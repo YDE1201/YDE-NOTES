@@ -1,0 +1,6 @@
+site_config.json
+data/summaries.js
+*.md.bak
+*.xlsx
+*.xls
+*.csv
