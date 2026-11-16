@@ -7,7 +7,14 @@ function main() {
   var REAL = window.SUMMARIES || null;
   var DATA = REAL || window.SAMPLE_SUMMARIES || { meta: { total: 45 }, lectures: [] };
   var USING_SAMPLE = !REAL;
-  var LECTURES = (DATA.lectures || []).slice().sort(function (a, b) { return a.no - b.no; });
+  var LECTURES = (DATA.lectures || []).slice();
+  LECTURES.forEach(function (l) {
+    l.category = l.category || "법인세";
+    l.site = l.site || "택스에듀넷";
+    l.id = l.id || (l.category + "-" + l.site + "-" + l.no);
+    l.date = l.date || l.updated || "";
+  });
+  LECTURES.sort(function (a, b) { return a.category.localeCompare(b.category) || a.site.localeCompare(b.site) || a.no - b.no; });
   var META = DATA.meta || {};
   var app = document.getElementById("app");
 
@@ -17,11 +24,25 @@ function main() {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
   }
-  function findLecture(no) {
-    for (var i = 0; i < LECTURES.length; i++) if (String(LECTURES[i].no) === String(no)) return LECTURES[i];
+  function findLecture(id) {
+    for (var i = 0; i < LECTURES.length; i++) if (LECTURES[i].id === id) return LECTURES[i];
+    for (i = 0; i < LECTURES.length; i++) if (String(LECTURES[i].no) === String(id)) return LECTURES[i];
     return null;
   }
   function lecLabel(l) { return l.no + "강. " + l.title; }
+  function lecHref(l, sub) { return "#/lecture/" + encodeURIComponent(l.id) + (sub ? "/" + sub : ""); }
+  function courses() {
+    var list = [];
+    (META.courses || []).forEach(function (c) { list.push({ category: c.category, site: c.site, total: c.total }); });
+    LECTURES.forEach(function (l) {
+      if (!list.some(function (c) { return c.category === l.category && c.site === l.site; })) list.push({ category: l.category, site: l.site });
+    });
+    list.forEach(function (c) {
+      c.items = LECTURES.filter(function (l) { return l.category === c.category && l.site === c.site; });
+      if (!c.total && c.category === "법인세" && c.site === "택스에듀넷") c.total = META.total;
+    });
+    return list;
+  }
   function store(key, val) {
     try { if (val === undefined) return localStorage.getItem(key); localStorage.setItem(key, val); } catch (e) { return null; }
   }
@@ -118,6 +139,7 @@ function main() {
     });
     makeCases(div);
     badgeLaws(div);
+    labelTables(div);
     return div;
   }
 
@@ -159,6 +181,10 @@ function main() {
         buf.push(line);
       });
       flush();
+      qaList(l).forEach(function (x) {
+        INDEX.push({ lec: l, secId: x.id, heading: "거래처 질문 › " + x.q, md: "**Q. " + x.q + "**\n\n" + x.a,
+          text: plain(x.q + "\n" + x.a).toLowerCase() });
+      });
     });
     return INDEX;
   }
@@ -235,20 +261,22 @@ function main() {
   }
 
   function viewHome() {
-    var total = META.total || 45, done = LECTURES.length;
-    var pct = Math.min(100, Math.round(done / total * 100));
-    var recent = LECTURES.slice().sort(function (a, b) { return String(b.updated || "").localeCompare(String(a.updated || "")) || b.no - a.no; }).slice(0, 3);
+    var progress = courses().map(function (c) {
+      var done = c.items.length, total = c.total || done || 1, pct = Math.min(100, Math.round(done / total * 100));
+      return '<div class="course-prog"><b>' + esc(c.category) + ' › ' + esc(c.site) + '</b>' +
+        '<div class="progress"><span style="width:' + pct + '%"></span></div>' +
+        '<span class="muted">' + (c.total ? c.total + '개 중 ' + done + '개 완료 (' + pct + '%)' : done + '개 정리됨') + '</span></div>';
+    }).join("");
+    var recent = LECTURES.slice().sort(function (a, b) { return String(b.date || "").localeCompare(String(a.date || "")) || b.no - a.no; }).slice(0, 3);
     app.innerHTML = sampleNotice() +
       '<h1 class="page-title">오늘도 한 걸음씩</h1>' +
-      '<p class="page-sub">법인세 강의 요약과 실무 도구를 한곳에 모았어요.</p>' +
-      '<div class="card"><b>법인세 강의 요약 진행</b>' +
-        '<div class="progress"><span style="width:' + pct + '%"></span></div>' +
-        '<span class="muted">' + total + '개 중 ' + done + '개 완료 (' + pct + '%)</span></div>' +
+      '<p class="page-sub">강의 요약과 실무 도구를 한곳에 모았어요.</p>' +
+      '<div class="card course-progs">' + progress + '</div>' +
       '<h2 class="section-h">궁금한 내용 찾기</h2>' +
       '<form class="searchbox" id="homeSearch"><input name="q" placeholder="예: 신고기한 연장, 최초 사업연도" aria-label="검색어"><button class="btn">찾기</button></form>' +
       (recent.length ? '<h2 class="section-h">최근 추가된 요약</h2><div class="lec-list">' + recent.map(lecItem).join("") + "</div>" : "") +
       '<h2 class="section-h">메뉴</h2><div class="grid">' +
-        tile("#/lectures", "📘", "법인세 강의 요약", "강의별 요약본을 읽기 좋게 모아 봐요.") +
+        tile("#/lectures", "📘", "강의 요약", "세목 › 강의 사이트 › 강의별로 요약과 거래처 Q&A를 모아 봐요.") +
         tile("#/search", "🔎", "검색", "요약본 전체에서 답과 출처 강의를 찾아요.") +
         tile("#/clients", "📊", "거래처 현황", "엑셀을 열어서 보기만 해요. 저장하지 않아요.", true) +
         tile("#/calculator", "🧮", "통합고용세액공제 계산기", "인원 변동으로 공제액을 계산해요.", true) +
@@ -264,45 +292,177 @@ function main() {
   }
   function lecItem(l) {
     var kw = (l.keywords || []).slice(0, 5).join(" · ");
-    return '<a class="card lec-item" href="#/lecture/' + l.no + '"><div class="lec-no">' + l.no + "</div><div><h3>" +
-      esc(l.title) + "</h3><p>" + esc([l.length, kw].filter(Boolean).join("  |  ")) + "</p></div></a>";
+    return '<a class="card lec-item" href="' + lecHref(l) + '"><div class="lec-no">' + l.no + "</div><div><h3>" +
+      esc(l.title) + (l.date ? ' <span class="lec-date">(' + esc(l.date) + ')</span>' : "") +
+      (l.qa ? ' <span class="pill soon">Q&amp;A ' + qaList(l).length + '</span>' : "") + "</h3><p>" +
+      esc([l.length, kw].filter(Boolean).join("  |  ")) + "</p></div></a>";
   }
 
+  var lecCat = "";
   function viewLectures() {
+    var cs = courses(), cats = [];
+    cs.forEach(function (c) { if (cats.indexOf(c.category) === -1) cats.push(c.category); });
     app.innerHTML = sampleNotice() +
-      '<h1 class="page-title">법인세 강의 요약</h1>' +
-      '<p class="page-sub">' + esc(META.course || "택스에듀넷 법인세 세무조정 실무") + " · " + LECTURES.length + "개 정리됨</p>" +
+      '<h1 class="page-title">강의 요약</h1>' +
+      '<p class="page-sub">대분류(세목) › 중분류(강의 사이트) › 강의 순서로 모았어요. 총 ' + LECTURES.length + '개</p>' +
+      '<div class="chips cat-chips" id="catChips">' + ['전체'].concat(cats).map(function (c) {
+        return '<button type="button" class="chip' + ((lecCat || "전체") === c ? " on" : "") + '" data-cat="' + esc(c) + '">' + esc(c) + "</button>";
+      }).join("") + "</div>" +
       '<div class="searchbox lec-filter"><input id="lecFilter" placeholder="강의 제목이나 키워드로 거르기" aria-label="강의 거르기"></div>' +
-      '<div class="lec-list" id="lecList"></div>';
-    var list = document.getElementById("lecList");
+      '<div id="lecTree"></div>';
+    var tree = document.getElementById("lecTree");
     function draw(f) {
       f = (f || "").trim().toLowerCase();
-      var items = LECTURES.filter(function (l) {
-        return !f || (l.no + " " + l.title + " " + (l.keywords || []).join(" ")).toLowerCase().indexOf(f) !== -1;
+      var html = "", lastCat = "";
+      cs.forEach(function (c) {
+        if (lecCat && lecCat !== "전체" && c.category !== lecCat) return;
+        var items = c.items.filter(function (l) {
+          return !f || (l.no + " " + l.title + " " + l.date + " " + (l.keywords || []).join(" ")).toLowerCase().indexOf(f) !== -1;
+        });
+        if (f && !items.length) return;
+        if (c.category !== lastCat) { html += '<h2 class="cat-h">' + esc(c.category) + "</h2>"; lastCat = c.category; }
+        html += '<section class="site-group"><h3 class="site-h">' + esc(c.site) +
+          ' <span class="muted">' + (c.total ? c.items.length + " / " + c.total + "강" : c.items.length + "강") + "</span></h3>" +
+          '<div class="lec-list">' + (items.length ? items.map(lecItem).join("") : '<p class="muted">아직 정리된 강의가 없어요.</p>') + "</div></section>";
       });
-      list.innerHTML = items.length ? items.map(lecItem).join("") : '<p class="muted">맞는 강의가 없어요.</p>';
+      tree.innerHTML = html || '<p class="muted">맞는 강의가 없어요.</p>';
     }
+    document.getElementById("catChips").onclick = function (e) {
+      var b = e.target.closest("[data-cat]"); if (!b) return;
+      lecCat = b.dataset.cat;
+      this.querySelectorAll(".chip").forEach(function (x) { x.classList.toggle("on", x === b); });
+      draw(document.getElementById("lecFilter").value);
+    };
     document.getElementById("lecFilter").oninput = function () { draw(this.value); };
     draw("");
   }
 
+  /* ---------- 강의 머리(분류 경로)와 탭: 요약 | 거래처 Q&A ---------- */
+  function lecHead(l, tab) {
+    var n = l.qa ? qaList(l).length : 0;
+    return '<div class="lec-head"><div class="crumbs"><a href="#/lectures">' + esc(l.category) + '</a> › ' + esc(l.site) +
+      ' › ' + esc(lecLabel(l)) + (l.date ? ' <span class="muted">(' + esc(l.date) + ')</span>' : "") + '</div>' +
+      '<div class="tabs" role="tablist">' +
+      '<a role="tab" class="tab' + (tab === "sum" ? " on" : "") + '" href="' + lecHref(l) + '">강의 요약</a>' +
+      '<a role="tab" class="tab' + (tab === "qa" ? " on" : "") + '" href="' + lecHref(l, "qa") + '">거래처 예상 질문' + (n ? " " + n : "") + '</a>' +
+      "</div></div>";
+  }
+  function lecNav(l) {
+    var i = LECTURES.indexOf(l), prev = LECTURES[i - 1], next = LECTURES[i + 1];
+    if (prev && (prev.category !== l.category || prev.site !== l.site)) prev = null;
+    if (next && (next.category !== l.category || next.site !== l.site)) next = null;
+    return '<div class="doc-nav">' + (prev ? '<a class="card" href="' + lecHref(prev) + '">← ' + esc(lecLabel(prev)) + "</a>" : "<span></span>") +
+      (next ? '<a class="card next" href="' + lecHref(next) + '">' + esc(lecLabel(next)) + " →</a>" : "<span></span>") + "</div>";
+  }
+
+  /* ---------- 거래처 예상 질문 (<이름>.qa.md: '## 질문' 아래에 답변) ---------- */
+  function qaList(l) {
+    if (l._qa) return l._qa;
+    var out = [], cur = null;
+    String(l.qa || "").split(/\r?\n/).forEach(function (line) {
+      var m = line.match(/^##\s+(.*)$/);
+      if (m) { cur = { q: m[1].replace(/^Q\d*[.)]\s*/, "").trim(), a: [] }; out.push(cur); return; }
+      if (cur) cur.a.push(line);
+    });
+    out.forEach(function (x, i) { x.a = x.a.join("\n").trim(); x.id = "qa-" + (i + 1); });
+    l._qa = out;
+    return out;
+  }
+  function viewQA(l, openId) {
+    var list = qaList(l);
+    app.innerHTML = lecHead(l, "qa") +
+      '<p class="page-sub">거래처에서 자주 물어볼 만한 질문을 강의 내용으로 답해 두었어요. 답변은 상황에 맞게 다듬어 쓰세요.</p>' +
+      (list.length ? '<div class="qa-list">' + list.map(function (x, i) {
+        return '<details class="card qa" id="' + x.id + '"' + (x.id === openId ? " open" : "") + '><summary><span class="qn">Q' + (i + 1) +
+          '</span><span class="qq">' + esc(x.q) + '</span></summary><div class="doc qa-a" data-i="' + i + '"></div></details>';
+      }).join("") + "</div>" :
+      '<div class="card placeholder"><b>아직 질문이 없어요.</b><p class="muted" style="margin:6px 0 0">요약 폴더에 <code>' + esc(String(l.file || "강의").replace(/\.md$/, "")) +
+      '.qa.md</code> 파일이 생기면 여기에 보여요.</p></div>') + lecNav(l);
+    app.querySelectorAll(".qa-a").forEach(function (box) {
+      var md = renderMarkdown(list[+box.dataset.i].a);
+      box.appendChild(md);
+      bindLaws(md, l);
+    });
+    document.title = lecLabel(l) + " 거래처 질문 · 숫자곳간";
+    var t = openId && document.getElementById(openId);
+    if (t) { t.scrollIntoView(); t.classList.add("flash"); } else window.scrollTo(0, 0);
+  }
+
+  /* ---------- 조문 배지 → 현행 조문 (krlaw 확인본) + 국가법령정보센터 ---------- */
+  var LAW_ALIAS = {
+    "법인세": { "법": "법인세법", "령": "법인세법 시행령", "시행령": "법인세법 시행령", "칙": "법인세법 시행규칙", "규칙": "법인세법 시행규칙" },
+    "부가가치세": { "법": "부가가치세법", "령": "부가가치세법 시행령", "시행령": "부가가치세법 시행령", "칙": "부가가치세법 시행규칙" },
+    "소득세": { "법": "소득세법", "령": "소득세법 시행령", "시행령": "소득세법 시행령", "칙": "소득세법 시행규칙" }
+  };
+  var LAW_SHORT = { "국조법": "국제조세조정에 관한 법률", "조특법": "조세특례제한법", "국기법": "국세기본법", "국징법": "국세징수법",
+    "부가세법": "부가가치세법", "외감법": "주식회사 등의 외부감사에 관한 법률" };
+  function resolveLaw(text, l) {
+    var t = String(text).replace(/\s+/g, " ").trim();
+    var m = t.match(/^(.*?)\s*(제\d+조(?:의\d+)?)/);
+    if (!m) return null;
+    var name = m[1].trim(), alias = LAW_ALIAS[l && l.category] || LAW_ALIAS["법인세"];
+    if (!name) name = "법";
+    var sub = name.match(/^(.*?)\s*(시행령|시행규칙)$/);
+    if (alias[name]) name = alias[name];
+    else if (LAW_SHORT[name]) name = LAW_SHORT[name];
+    else if (sub && sub[1]) name = (LAW_SHORT[sub[1]] || sub[1]) + " " + sub[2];
+    else if (sub && !sub[1]) name = alias[sub[2]] || name;
+    return { law: name, article: m[2], key: name + " " + m[2] };
+  }
+  function lawUrl(r) { return "https://www.law.go.kr/" + encodeURIComponent("법령") + "/" + encodeURIComponent(r.law.replace(/\s+/g, "")) + "/" + encodeURIComponent(r.article); }
+  function bindLaws(root, l) {
+    root.querySelectorAll(".law, .art").forEach(function (b) {
+      if (b.dataset.bound) return;
+      var r = resolveLaw(b.textContent, l);
+      if (!r) return;
+      b.dataset.bound = "1";
+      b.classList.add("law-link");
+      b.setAttribute("role", "button");
+      b.setAttribute("tabindex", "0");
+      b.title = r.key + " 현행 조문 보기";
+      b.addEventListener("click", function (e) { e.preventDefault(); openLaw(r, l); });
+      b.addEventListener("keydown", function (e) { if (e.key === "Enter") openLaw(r, l); });
+    });
+  }
+  function openLaw(r, l) {
+    var laws = (l && l.laws) || {}, arts = laws.articles || {}, note = arts[r.key];
+    var sheet = document.getElementById("lawSheet");
+    if (!sheet) {
+      sheet = document.createElement("div");
+      sheet.id = "lawSheet";
+      sheet.innerHTML = '<div class="ls-scrim"></div><div class="ls-box card" role="dialog" aria-modal="true" aria-labelledby="lsTitle"></div>';
+      document.body.appendChild(sheet);
+      sheet.querySelector(".ls-scrim").onclick = function () { sheet.hidden = true; };
+      document.addEventListener("keydown", function (e) { if (e.key === "Escape") sheet.hidden = true; });
+    }
+    sheet.querySelector(".ls-box").innerHTML =
+      '<div class="ls-top"><h3 id="lsTitle">' + esc(r.key) + '</h3><button type="button" class="btn ghost ls-x" aria-label="닫기">닫기</button></div>' +
+      (note ? '<div class="ls-label">현행 조문 요지</div><p class="ls-note">' + esc(note) + '</p>' +
+        '<p class="muted ls-src">' + esc(laws.source || "krlaw") + " 기준 · " + esc(laws.checked || "") + " 확인</p>"
+        : '<p class="muted">이 강의에 정리된 현행 요지가 아직 없어요. 아래에서 현행 원문을 바로 볼 수 있어요.</p>') +
+      '<a class="btn" href="' + lawUrl(r) + '" target="_blank" rel="noopener">국가법령정보센터에서 현행 원문 보기</a>';
+    sheet.querySelector(".ls-x").onclick = function () { sheet.hidden = true; };
+    sheet.hidden = false;
+    sheet.querySelector(".ls-x").focus();
+  }
+
   var spy = null;
-  function viewLecture(no, secId) {
-    var l = findLecture(no);
+  function viewLecture(id, secId) {
+    var l = findLecture(id);
     if (!l) { app.innerHTML = '<p>요약본을 찾지 못했어요. <a href="#/lectures">목록으로</a></p>'; return; }
+    if (secId && /^qa(-\d+)?$/.test(secId)) { viewQA(l, secId === "qa" ? "" : secId); return; }
     if (l.html) { viewLectureHtml(l, secId); return; }
     var body = renderMarkdown(l.md);
     var heads = body.querySelectorAll("h2, h3");
     var toc = '<details open><summary>목차</summary>' + Array.prototype.map.call(heads, function (h) {
-      return '<a class="' + h.tagName.toLowerCase() + '" href="#/lecture/' + l.no + "/" + h.id + '" data-sec="' + h.id + '">' + esc(h.textContent) + "</a>";
+      return '<a class="' + h.tagName.toLowerCase() + '" href="' + lecHref(l, h.id) + '" data-sec="' + h.id + '">' + esc(h.textContent) + "</a>";
     }).join("") + "</details>";
     var i = LECTURES.indexOf(l), prev = LECTURES[i - 1], next = LECTURES[i + 1];
-    app.innerHTML = '<div class="lecture"><aside class="toc">' + toc + '</aside><article class="doc"><div class="doc-meta">' +
+    app.innerHTML = lecHead(l, "sum") + '<div class="lecture"><aside class="toc">' + toc + '</aside><article class="doc"><div class="doc-meta">' +
       (l.source ? "<span>" + esc(l.source) + "</span>" : "") + (l.length ? "<span>" + esc(l.length) + "</span>" : "") +
-      (l.updated ? "<span>정리 " + esc(l.updated) + "</span>" : "") + '</div><div id="docBody"></div>' +
-      '<div class="doc-nav">' + (prev ? '<a class="card" href="#/lecture/' + prev.no + '">← ' + esc(lecLabel(prev)) + "</a>" : "<span></span>") +
-      (next ? '<a class="card next" href="#/lecture/' + next.no + '">' + esc(lecLabel(next)) + " →</a>" : "<span></span>") + "</div></article></div>";
+      (l.updated ? "<span>정리 " + esc(l.updated) + "</span>" : "") + '</div><div id="docBody"></div>' + lecNav(l) + "</article></div>";
     document.getElementById("docBody").appendChild(body);
+    bindLaws(body, l);
     if (window.innerWidth <= 1100) app.querySelector(".toc details").removeAttribute("open");
     document.title = lecLabel(l) + " · 숫자곳간";
 
@@ -323,6 +483,31 @@ function main() {
     window.scrollTo(0, 0);
   }
 
+  /* 휴대폰에서는 표를 한 줄씩 카드로 쌓아 보여 줘요. 칸마다 제목(머리글)을 붙여 둬요. */
+  function labelTables(root) {
+    root.querySelectorAll("table").forEach(function (t) {
+      var heads = Array.prototype.map.call(t.querySelectorAll("thead th"), function (th) { return th.textContent.trim(); });
+      if (!heads.length) return;
+      t.classList.add("stack");
+      t.querySelectorAll("tbody tr").forEach(function (tr) {
+        Array.prototype.forEach.call(tr.children, function (td, i) { if (heads[i]) td.setAttribute("data-label", heads[i]); });
+      });
+    });
+  }
+  var STACK_CSS = "@media (max-width:640px){" +
+    "table.stack{min-width:0 !important;width:100%;border:0}" +
+    "table.stack thead{display:none}" +
+    "table.stack,table.stack tbody,table.stack tr,table.stack td{display:block;width:100%}" +
+    "table.stack tr{padding:12px 14px;border-bottom:1px solid var(--line)}" +
+    "table.stack tr:last-child{border-bottom:0}" +
+    "table.stack td{border:0 !important;padding:2px 0 !important;white-space:normal !important}" +
+    "table.stack td:first-child{font-weight:700;font-size:1.02em;padding-bottom:6px !important}" +
+    "table.stack td:not(:first-child)[data-label]::before{content:attr(data-label);display:block;font-size:12px;font-weight:600;color:var(--muted, var(--text-2));margin-top:4px}" +
+    "table.stack td:empty{display:none}" +
+    "table.stack .art,table.stack .law{white-space:normal}" +
+    ".tbl,.table-wrap{overflow-x:visible}" +
+    "}";
+
   /* 강의 요약 작업에서 따로 꾸민 페이지(.html)가 있으면 그 디자인 그대로 보여 줘요.
      페이지의 스타일이 곳간 화면과 섞이지 않도록 Shadow DOM 안에 넣어요. */
   function lectureCss(css) {
@@ -334,6 +519,7 @@ function main() {
       + "\n:host{display:block}" +
       "\n.lec-body{padding:0 !important;background:transparent}" +
       "\nnav.toc{top:76px !important}" +
+      "\n.law-link{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}.law-link:hover{outline:2px solid var(--accent)}" +
       "\nmain{grid-template-columns:minmax(0,1fr)}main>*{min-width:0}" +
       "\n.flash{animation:flash 1.6s ease-out}@keyframes flash{from{background:var(--accent-soft)}to{background:transparent}}";
   }
@@ -345,14 +531,14 @@ function main() {
       document.head.appendChild(lk);
     }
     var i = LECTURES.indexOf(l), prev = LECTURES[i - 1], next = LECTURES[i + 1];
-    app.innerHTML = '<div class="lec-host"></div><div class="doc-nav">' +
-      (prev ? '<a class="card" href="#/lecture/' + prev.no + '">← ' + esc(lecLabel(prev)) + "</a>" : "<span></span>") +
-      (next ? '<a class="card next" href="#/lecture/' + next.no + '">' + esc(lecLabel(next)) + " →</a>" : "<span></span>") + "</div>";
+    app.innerHTML = lecHead(l, "sum") + '<div class="lec-host"></div>' + lecNav(l);
     var host = app.querySelector(".lec-host");
     var theme = document.documentElement.getAttribute("data-theme");
     if (theme) host.setAttribute("data-theme", theme);
     var root = host.attachShadow({ mode: "open" });
-    root.innerHTML = "<style>" + lectureCss(l.css) + '</style><div class="lec-body">' + l.html + "</div>";
+    root.innerHTML = "<style>" + lectureCss(l.css) + STACK_CSS + '</style><div class="lec-body">' + l.html + "</div>";
+    labelTables(root);
+    bindLaws(root, l);
     // 페이지 안 목차 링크(#concept 등)는 그 자리로 스크롤만 해요
     root.addEventListener("click", function (e) {
       var a = e.target.closest && e.target.closest('a[href^="#"]');
@@ -410,7 +596,7 @@ function main() {
     var ans = document.createElement("div");
     ans.className = "card answer";
     ans.innerHTML = '<div class="label">가장 가까운 내용</div><h3>' + esc(lecLabel(top.lec)) + " › " + esc(top.heading) +
-      '</h3><div class="doc" id="ansBody"></div><p style="margin:12px 0 0"><a class="btn" href="#/lecture/' + top.lec.no + "/" + top.secId +
+      '</h3><div class="doc" id="ansBody"></div><p style="margin:12px 0 0"><a class="btn" href="' + lecHref(top.lec, top.secId) +
       '">본문에서 보기</a></p><p class="muted" style="font-size:13px;margin:10px 0 0">요약본에 적힌 내용을 그대로 찾아 보여 드려요. 실제 적용 전에는 조문을 한 번 더 확인하세요.</p>';
     var rendered = renderMarkdown(topMd);
     rendered.querySelectorAll("h2, h3").forEach(function (h) { h.remove(); });
@@ -422,7 +608,7 @@ function main() {
       var more = document.createElement("div");
       more.innerHTML = '<h2 class="section-h">다른 관련 내용 ' + (r.results.length - 1) + "개</h2>" +
         r.results.slice(1).map(function (x) {
-          return '<a class="card result" href="#/lecture/' + x.c.lec.no + "/" + x.c.secId + '"><div class="src">' + esc(lecLabel(x.c.lec)) +
+          return '<a class="card result" href="' + lecHref(x.c.lec, x.c.secId) + '"><div class="src">' + esc(lecLabel(x.c.lec)) +
             "</div><h4>" + esc(x.c.heading) + "</h4><p>" + esc(snippet(plain(x.c.md), r.terms)) + "</p></a>";
         }).join("");
       highlight(more, r.terms);
@@ -481,6 +667,9 @@ function main() {
   document.getElementById("navFoot").textContent = USING_SAMPLE ? "예시 데이터로 보는 중" :
     "요약본 " + LECTURES.length + "개" + (META.built ? " · " + META.built + " 업데이트" : "") + (META.public ? " · 공개용" : "");
 
+  if (!document.getElementById("stackCss")) {
+    var st = document.createElement("style"); st.id = "stackCss"; st.textContent = STACK_CSS; document.head.appendChild(st);
+  }
   window.addEventListener("hashchange", route);
   route();
 }

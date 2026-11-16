@@ -1,4 +1,4 @@
-/* 나의 업무 노트 - 공통 스타일
+/* 숫자곳간 - 공통 스타일
    색은 아래 변수만 바꾸면 사이트 전체에 반영돼요. */
 :root {
   --bg: #f7f6f2;
@@ -169,3 +169,43 @@ mark { background: var(--mark); color: inherit; padding: 0 2px; border-radius: 3
 }
 .case > p:first-child > strong:first-child { display: block; margin-bottom: 4px; font-size: 16.5px; }
 .case > p:first-child > strong:first-child + br { display: none; }
+
+/* 강의 분류 · 탭 · 거래처 질문 · 조문 시트 */
+.course-progs { display: grid; gap: 14px; }
+.course-prog .progress { margin: 8px 0 4px; }
+.cat-chips { margin: 0 0 14px; }
+.chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.cat-h { font-size: 21px; margin: 28px 0 6px; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
+.site-group { margin: 14px 0 22px; }
+.site-h { font-size: 16px; margin: 0 0 10px; color: var(--text-2); font-weight: 700; }
+.lec-date { font-size: 14px; font-weight: 500; color: var(--text-2); }
+.lec-head { margin: 0 0 18px; }
+.crumbs { font-size: 14px; color: var(--text-2); margin-bottom: 10px; }
+.crumbs a { color: var(--text-2); }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tab { padding: 10px 14px; text-decoration: none; color: var(--text-2); border-bottom: 3px solid transparent; margin-bottom: -1px; white-space: nowrap; font-weight: 600; }
+.tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+.tab:hover { color: var(--accent); }
+.qa-list { display: grid; gap: 10px; }
+.qa { padding: 0; }
+.qa summary { list-style: none; cursor: pointer; display: flex; gap: 12px; align-items: flex-start; padding: 16px 18px; }
+.qa summary::-webkit-details-marker { display: none; }
+.qa summary::after { content: "＋"; margin-left: auto; color: var(--text-2); }
+.qa[open] summary::after { content: "－"; }
+.qn { flex: none; font-weight: 800; color: var(--accent); }
+.qq { font-weight: 700; }
+.qa-a { padding: 0 18px 14px 18px; border-top: 1px solid var(--line); }
+.qa-a > div > :first-child { margin-top: 12px; }
+.law-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.law-link:hover, .law-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#lawSheet { position: fixed; inset: 0; z-index: 60; }
+#lawSheet .ls-scrim { position: absolute; inset: 0; background: rgba(0,0,0,.35); }
+#lawSheet .ls-box { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow-y: auto; }
+.ls-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.ls-top h3 { margin: 0; font-size: 18px; flex: 1; }
+.ls-label { font-size: 12.5px; font-weight: 700; color: var(--accent); }
+.ls-note { margin: 4px 0 6px; line-height: 1.75; }
+.ls-src { font-size: 12.5px; margin: 0 0 14px; }
+@media (max-width: 640px) {
+  #lawSheet .ls-box { left: 0; right: 0; top: auto; bottom: 0; transform: none; width: auto; border-radius: 16px 16px 0 0; padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+}
