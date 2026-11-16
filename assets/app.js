@@ -1,4 +1,4 @@
-/* 나의 업무 노트 - 화면 동작
+/* 숫자곳간 - 화면 동작
    데이터: data/summaries.js (tools/build_site.py 가 만듦) 또는 data/sample.js (예시)
    인터넷 연결 없이, 파일을 더블클릭해서 열어도 동작하도록 만들었어요. */
 function main() {
@@ -303,7 +303,7 @@ function main() {
       (next ? '<a class="card next" href="#/lecture/' + next.no + '">' + esc(lecLabel(next)) + " →</a>" : "<span></span>") + "</div></article></div>";
     document.getElementById("docBody").appendChild(body);
     if (window.innerWidth <= 1100) app.querySelector(".toc details").removeAttribute("open");
-    document.title = lecLabel(l) + " · 나의 업무 노트";
+    document.title = lecLabel(l) + " · 숫자곳간";
 
     if (spy) spy.disconnect();
     if ("IntersectionObserver" in window) {
@@ -392,7 +392,7 @@ function main() {
     var parts = path.split("/").filter(Boolean);
     var nav = parts[0] || "home";
     document.body.classList.remove("nav-open");
-    document.title = "나의 업무 노트";
+    document.title = "숫자곳간";
     if (nav === "lectures") viewLectures();
     else if (nav === "lecture") { nav = "lectures"; viewLecture(parts[1], parts[2]); }
     else if (nav === "search") viewSearch((query.match(/(?:^|&)q=([^&]*)/) || [])[1] || "");
@@ -438,7 +438,7 @@ function lockScreen() {
   var app = document.getElementById("app");
   document.getElementById("sidenav").style.visibility = "hidden";
   app.innerHTML = '<div class="card" style="max-width:420px;margin:40px auto">' +
-    '<h1 class="page-title" style="font-size:22px">🔒 나의 업무 노트</h1>' +
+    '<h1 class="page-title" style="font-size:22px">🔒 숫자곳간</h1>' +
     '<p class="muted" style="margin:0 0 16px">비밀번호를 넣으면 열려요.</p>' +
     '<form id="lockForm" class="searchbox"><input id="pw" type="password" autocomplete="current-password" placeholder="비밀번호" aria-label="비밀번호"><button class="btn">열기</button></form>' +
     '<label class="muted" style="display:flex;gap:6px;align-items:center;margin-top:12px;font-size:14px"><input type="checkbox" id="remember" checked> 이 기기에서 기억하기</label>' +
