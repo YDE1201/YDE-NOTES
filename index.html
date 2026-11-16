@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>나의 업무 노트</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="topbar">
+  <button class="menu-btn" id="menuBtn" aria-label="메뉴 열기">☰</button>
+  <a class="brand" href="#/">나의 업무 노트</a>
+  <button class="theme-btn" id="themeBtn" aria-label="밝기 바꾸기" title="밝게 / 어둡게">🌓</button>
+</header>
+
+<nav class="sidenav" id="sidenav" aria-label="주 메뉴">
+  <a href="#/" data-nav="home"><span class="ico">⌂</span>처음 화면</a>
+  <a href="#/lectures" data-nav="lectures"><span class="ico">📘</span>법인세 강의 요약</a>
+  <a href="#/search" data-nav="search"><span class="ico">🔎</span>검색</a>
+  <a href="#/clients" data-nav="clients"><span class="ico">📊</span>거래처 현황</a>
+  <a href="#/calculator" data-nav="calculator"><span class="ico">🧮</span>통합고용세액공제 계산기</a>
+  <div class="nav-foot" id="navFoot"></div>
+</nav>
+<div class="scrim" id="scrim"></div>
+
+<main id="app" tabindex="-1"></main>
+
+<!-- 보기 전용 예시 데이터 (요약본이 아직 없을 때 보여요) -->
+<script src="data/sample.js"></script>
+<!-- 실제 요약본 데이터: tools/build_site.py 가 만들어요. GitHub 에는 올리지 않아요 -->
+<script src="data/summaries.js"></script>
+<!-- 인터넷에 올린 버전: 비밀번호로 잠근 요약본 -->
+<script src="data/encrypted.js"></script>
+<script src="vendor/marked.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
