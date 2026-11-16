@@ -290,6 +290,7 @@ function main() {
   function viewLecture(no, secId) {
     var l = findLecture(no);
     if (!l) { app.innerHTML = '<p>요약본을 찾지 못했어요. <a href="#/lectures">목록으로</a></p>'; return; }
+    if (l.html) { viewLectureHtml(l, secId); return; }
     var body = renderMarkdown(l.md);
     var heads = body.querySelectorAll("h2, h3");
     var toc = '<details open><summary>목차</summary>' + Array.prototype.map.call(heads, function (h) {
@@ -318,6 +319,67 @@ function main() {
     if (secId) {
       var t = document.getElementById(secId);
       if (t) { t.scrollIntoView(); t.classList.remove("flash"); void t.offsetWidth; t.classList.add("flash"); return; }
+    }
+    window.scrollTo(0, 0);
+  }
+
+  /* 강의 요약 작업에서 따로 꾸민 페이지(.html)가 있으면 그 디자인 그대로 보여 줘요.
+     페이지의 스타일이 곳간 화면과 섞이지 않도록 Shadow DOM 안에 넣어요. */
+  function lectureCss(css) {
+    return String(css || "")
+      .replace(/:root:not\(\[data-theme="light"\]\)/g, ':host(:not([data-theme="light"]))')
+      .replace(/:root\[data-theme="dark"\]/g, ':host([data-theme="dark"])')
+      .replace(/:root\b/g, ":host")
+      .replace(/(^|[}\s,])body\s*\{/g, "$1.lec-body{")
+      + "\n:host{display:block}" +
+      "\n.lec-body{padding:0 !important;background:transparent}" +
+      "\nnav.toc{top:76px !important}" +
+      "\nmain{grid-template-columns:minmax(0,1fr)}main>*{min-width:0}" +
+      "\n.flash{animation:flash 1.6s ease-out}@keyframes flash{from{background:var(--accent-soft)}to{background:transparent}}";
+  }
+  function norm(t) { return String(t || "").replace(/^[\s\d.\-·]+/, "").replace(/[^0-9a-z가-힣]/gi, "").toLowerCase(); }
+  function viewLectureHtml(l, secId) {
+    if (l.fontHref && !document.querySelector('link[data-lec-font]')) {
+      var lk = document.createElement("link");
+      lk.rel = "stylesheet"; lk.href = l.fontHref; lk.setAttribute("data-lec-font", "1");
+      document.head.appendChild(lk);
+    }
+    var i = LECTURES.indexOf(l), prev = LECTURES[i - 1], next = LECTURES[i + 1];
+    app.innerHTML = '<div class="lec-host"></div><div class="doc-nav">' +
+      (prev ? '<a class="card" href="#/lecture/' + prev.no + '">← ' + esc(lecLabel(prev)) + "</a>" : "<span></span>") +
+      (next ? '<a class="card next" href="#/lecture/' + next.no + '">' + esc(lecLabel(next)) + " →</a>" : "<span></span>") + "</div>";
+    var host = app.querySelector(".lec-host");
+    var theme = document.documentElement.getAttribute("data-theme");
+    if (theme) host.setAttribute("data-theme", theme);
+    var root = host.attachShadow({ mode: "open" });
+    root.innerHTML = "<style>" + lectureCss(l.css) + '</style><div class="lec-body">' + l.html + "</div>";
+    // 페이지 안 목차 링크(#concept 등)는 그 자리로 스크롤만 해요
+    root.addEventListener("click", function (e) {
+      var a = e.target.closest && e.target.closest('a[href^="#"]');
+      if (!a) return;
+      var t = root.getElementById(a.getAttribute("href").slice(1));
+      if (t) { e.preventDefault(); t.scrollIntoView({ behavior: "smooth" }); }
+    });
+    document.title = lecLabel(l) + " · 숫자곳간";
+    if (secId) {
+      // 검색 결과에서 왔으면, 요약본의 같은 제목을 이 페이지에서 찾아 보여 줘요
+      var md = renderMarkdown(l.md), h = md.querySelector("#" + secId);
+      var want = norm(h && h.textContent);
+      var target = null;
+      if (want) {
+        root.querySelectorAll("h2, h3, .case .q, .case, section").forEach(function (el) {
+          if (target) return;
+          var t = norm(el.matches(".case") ? (el.querySelector(".q") || el).textContent : el.textContent);
+          if (t && (t === want || (want.length >= 4 && t.indexOf(want) === 0) || (t.length >= 4 && want.indexOf(t) === 0))) target = el;
+        });
+        if (!target) {
+          root.querySelectorAll("h2, h3, .case .q").forEach(function (el) {
+            var t = norm(el.textContent);
+            if (!target && t.length >= 2 && (want.indexOf(t) !== -1 || t.indexOf(want) !== -1)) target = el;
+          });
+        }
+      }
+      if (target) { target.scrollIntoView(); target.classList.add("flash"); return; }
     }
     window.scrollTo(0, 0);
   }
@@ -411,6 +473,7 @@ function main() {
       (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
     var next = cur === "dark" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", next);
+    document.querySelectorAll(".lec-host").forEach(function (h) { h.setAttribute("data-theme", next); });
     store("theme", next);
   };
   document.getElementById("menuBtn").onclick = function () { document.body.classList.toggle("nav-open"); };
