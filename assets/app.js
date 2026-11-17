@@ -16,6 +16,10 @@ function main() {
   });
   LECTURES.sort(function (a, b) { return a.category.localeCompare(b.category) || a.site.localeCompare(b.site) || a.no - b.no; });
   var META = DATA.meta || {};
+  var DICT = (DATA.dict || []).slice().sort(function (a, b) { return a.category.localeCompare(b.category) || a.title.localeCompare(b.title); });
+  // 사전 항목을 검색·조문 연결에서 강의처럼 다룰 수 있게 해 줘요
+  DICT.forEach(function (d) { d._lec = { id: "dict-" + d.id, category: "법인세", keywords: d.keywords || [], title: d.title, isDict: true }; });
+  function dictHref(d, sec) { return "#/dict/" + encodeURIComponent(d.id) + (sec ? "/" + sec : ""); }
   var app = document.getElementById("app");
 
   /* ---------- 작은 도우미 ---------- */
@@ -63,7 +67,7 @@ function main() {
   }
 
   /* ---------- 강의 본문 꾸미기 ---------- */
-  var LAW_RE = /((?:법인세법|소득세법|부가가치세법|국세기본법|국세징수법|조세특례제한법|조특법|국제조세조정에 관한 법률|국조법|지방세법|상법|민법|외감법)\s*)?((?:시행령|시행규칙)\s*)?제\d+조(?:의\d+)?(?:\s*제\d+항)?(?:\s*제\d+호)?/g;
+  var LAW_RE = /((?:국제조세조정에 관한 법률|고용보험 및 산업재해보상보험의 보험료징수 등에 관한 법률|근로자퇴직급여 보장법|주식회사 등의 외부감사에 관한 법률|상법|민법|[가-힣]{1,15}법)\s*)?((?:시행령|시행규칙)\s*)?제\d+조(?:의\d+)?(?:\s*제\d+항)?(?:\s*제\d+호)?/g;
 
   function badgeLaws(root) {
     var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
@@ -181,10 +185,27 @@ function main() {
         buf.push(line);
       });
       flush();
-      qaList(l).forEach(function (x) {
-        INDEX.push({ lec: l, secId: x.id, heading: "거래처 질문 › " + x.q, md: "**Q. " + x.q + "**\n\n" + x.a,
-          text: plain(x.q + "\n" + x.a).toLowerCase() });
+      ["qa", "my"].forEach(function (kind) {
+        notesList(l, kind).forEach(function (x) {
+          INDEX.push({ lec: l, secId: x.id, kind: kind, heading: NOTE_KIND[kind].head + " › " + x.q, md: "**Q. " + x.q + "**\n\n" + x.a,
+            text: plain(x.q + "\n" + x.a).toLowerCase() });
+        });
       });
+    });
+    DICT.forEach(function (d) {
+      var sec = 0, head = "", buf = [];
+      function flush() {
+        var md = buf.join("\n").trim(); buf = [];
+        if (!md) return;
+        INDEX.push({ lec: d._lec, secId: "sec-" + sec, heading: d.title + (head ? " › " + head : ""), md: md, text: plain(d.title + "\n" + md).toLowerCase(),
+          href: dictHref(d, sec ? "sec-" + sec : ""), src: "세무 사전", short: "사전" });
+      }
+      String(d.md || "").split(/\r?\n/).forEach(function (line) {
+        var m = line.match(/^(#{2,3})\s+(.*)$/);
+        if (m) { flush(); sec++; head = m[2].replace(/\*\*/g, "").trim(); }
+        buf.push(line);
+      });
+      flush();
     });
     return INDEX;
   }
@@ -254,6 +275,159 @@ function main() {
     return s.replace(/\n+/g, " ");
   }
 
+  /* ---------- 법령 조문 전체 (data/laws.js, tools/fetch_laws.py 가 받아요) ---------- */
+  var LAWIDX = null, LAWALL = "";
+  function loadLaws(cb) {
+    if (window.LAWS) { buildLawIdx(); cb(true); return; }
+    if (loadLaws.failed) { cb(false); return; }
+    (loadLaws.wait = loadLaws.wait || []).push(cb);
+    if (loadLaws.wait.length > 1) return;
+    var sc = document.createElement("script");
+    sc.src = "data/laws.js";
+    sc.onload = function () { buildLawIdx(); var w = loadLaws.wait; loadLaws.wait = []; w.forEach(function (f) { f(!!window.LAWS); }); };
+    sc.onerror = function () { loadLaws.failed = true; var w = loadLaws.wait; loadLaws.wait = []; w.forEach(function (f) { f(false); }); };
+    document.head.appendChild(sc);
+  }
+  function buildLawIdx() {
+    if (LAWIDX || !window.LAWS) return;
+    LAWIDX = [];
+    var parts = [];
+    (window.LAWS.laws || []).forEach(function (law) {
+      (law.arts || []).forEach(function (a) {
+        var low = (a[1] + "\n" + a[2]).toLowerCase();
+        LAWIDX.push({ law: law.name, ef: law.ef, no: a[0], title: a[1], text: a[2], chapter: a[3] || "", low: low, key: law.name + " " + a[0] });
+        parts.push(low);
+      });
+    });
+    LAWALL = parts.join("\n");
+  }
+  function findArticle(key) {
+    if (!LAWIDX) return null;
+    for (var i = 0; i < LAWIDX.length; i++) if (LAWIDX[i].key === key) return LAWIDX[i];
+    return null;
+  }
+  function searchLaws(q, limit) {
+    if (!LAWIDX) return [];
+    var out = [], seen = {};
+    // "법인세법 제60조"처럼 조문을 바로 적으면 그 조문을 맨 앞에
+    LAW_RE.lastIndex = 0;
+    var m, cite = [];
+    while ((m = LAW_RE.exec(q))) { var r = resolveLaw(m[0], null); if (r) cite.push(r.key); }
+    cite.forEach(function (k) { var a = findArticle(k); if (a && !seen[k]) { seen[k] = 1; out.push(a); } });
+    var rest = q.replace(LAW_RE, " ");
+    var toks = String(rest || "").toLowerCase().split(/[\s,.?!·~"'()\[\]{}:;/]+/).filter(function (t) { return t.length >= 2; });
+    var terms = [];
+    toks.forEach(function (t) {
+      var vs = variants(t);
+      for (var i = 0; i < vs.length; i++) if (LAWALL.indexOf(vs[i]) !== -1) { terms.push(vs[i]); return; }
+    });
+    terms = terms.filter(function (v, i) { return terms.indexOf(v) === i; });
+    if (terms.length) {
+      var scored = [];
+      LAWIDX.forEach(function (a) {
+        var hit = 0, score = 0, tl = a.title.toLowerCase();
+        terms.forEach(function (t) {
+          var n = countOf(a.low, t);
+          if (n) { hit++; score += (1 + Math.log(n)) * Math.min(t.length, 6); }
+          if (tl.indexOf(t) !== -1) score += 12;
+        });
+        if (!hit) return;
+        if (hit < terms.length) score *= 0.3 * hit / terms.length;
+        else if (terms.length > 1) score *= 1.5;
+        if (/시행규칙/.test(a.law)) score *= 0.8;
+        scored.push({ a: a, s: score });
+      });
+      scored.sort(function (x, y) { return y.s - x.s; });
+      scored.forEach(function (x) { if (!seen[x.a.key]) { seen[x.a.key] = 1; out.push(x.a); } });
+    }
+    return out.slice(0, limit || 10);
+  }
+  function lawTerms(q) {
+    var toks = String(q || "").replace(LAW_RE, " ").toLowerCase().split(/[\s,.?!·~"'()\[\]{}:;/]+/).filter(function (t) { return t.length >= 2; });
+    var terms = [];
+    toks.forEach(function (t) { var vs = variants(t); for (var i = 0; i < vs.length; i++) if (LAWALL.indexOf(vs[i]) !== -1) { terms.push(vs[i]); return; } });
+    return terms;
+  }
+  // 국세청 해석·판례는 원문 사이트에서 같은 검색어로 찾아요
+  var OUT_LINKS = [
+    { label: "국세청 해석(질의회신·예규)", url: function (q) { return "https://taxlaw.nts.go.kr/is/USEISA001M.do?schVcb=" + encodeURIComponent(q); } },
+    { label: "판례(대법원 등)", url: function (q) { return "https://www.law.go.kr/LSW/precSc.do?menuId=7&query=" + encodeURIComponent(q); } },
+    { label: "법령 원문", url: function (q) { return "https://www.law.go.kr/LSW/lsSc.do?menuId=1&query=" + encodeURIComponent(q); } }
+  ];
+  function outLinks(q) {
+    return '<div class="out-links">' + OUT_LINKS.map(function (o) {
+      return '<a class="btn ghost" href="' + esc(o.url(q)) + '" target="_blank" rel="noopener">' + esc(o.label) + ' ↗</a>';
+    }).join("") + "</div>";
+  }
+
+  /* ---------- 검색창 아래 미리보기: 볼 조문 · 국세청 해석 · 강의 목차 ---------- */
+  var RULING_RE = /\[((?:서면|사전|법규|기획재정부|조심|국심|법인세과|소득세과|원천세과|부가가치세과|기준)[^\]]*)\]\((https?:[^)\s]+)\)/g;
+  function previewData(q) {
+    var r = search(q);
+    var lawHits = searchLaws(q, 4);
+    if (!r.results.length && !lawHits.length) return null;
+    var top = r.results.slice(0, 8), laws = [], seen = {}, rulings = [], seenR = {};
+    function addLaw(rr, lec) { if (rr && !seen[rr.key]) { seen[rr.key] = 1; laws.push({ r: rr, lec: lec }); } }
+    top.forEach(function (x) {
+      var c = x.c, m;
+      LAW_RE.lastIndex = 0;
+      while ((m = LAW_RE.exec(c.md))) addLaw(resolveLaw(m[0], c.lec), c.lec);
+      RULING_RE.lastIndex = 0;
+      while ((m = RULING_RE.exec(c.md))) if (!seenR[m[1]]) { seenR[m[1]] = 1; rulings.push({ t: m[1], u: m[2], lec: c.lec }); }
+    });
+    // axtax(krlaw)로 정리해 둔 조문 요지에 검색어가 들어 있으면 함께 보여 줘요
+    LECTURES.forEach(function (l) {
+      var arts = (l.laws && l.laws.articles) || {};
+      Object.keys(arts).forEach(function (k) {
+        var hay = (k + " " + arts[k]).toLowerCase();
+        if (r.terms.some(function (t) { return hay.indexOf(t) !== -1; })) {
+          var mm = k.match(/^(.*?)\s*(제\d+조(?:의\d+)?)$/);
+          if (mm) addLaw({ law: mm[1], article: mm[2], key: k }, l);
+        }
+      });
+    });
+    var secs = [], seenS = {};
+    top.forEach(function (x) {
+      var k = x.c.lec.id + "|" + x.c.secId;
+      if (!seenS[k] && secs.length < 5) { seenS[k] = 1; secs.push(x.c); }
+    });
+    // 법령 조문 전체에서 찾은 조문을 앞에
+    var fromLaw = lawHits.map(function (a) { return { r: { law: a.law, article: a.no, key: a.key }, lec: null, title: a.title }; });
+    laws = fromLaw.concat(laws.filter(function (x) { return !fromLaw.some(function (y) { return y.r.key === x.r.key; }); }));
+    return { laws: laws.slice(0, 8), rulings: rulings.slice(0, 5), secs: secs };
+  }
+  function renderPreview(box, q) {
+    q = String(q || "").trim();
+    var d = q.length >= 2 ? previewData(q) : null;
+    if (!d) { box.hidden = true; box.innerHTML = ""; return; }
+    box.innerHTML =
+      (d.laws.length ? '<div class="pv-row"><div class="pv-h">볼 조문</div><div class="pv-chips">' + d.laws.map(function (x, i) {
+        var has = LECTURES.some(function (o) { return o.laws && o.laws.articles && o.laws.articles[x.r.key]; });
+        return '<button type="button" class="chip pv-law' + (has ? " has-note" : "") + '" data-i="' + i + '" title="현행 조문 보기">' +
+          esc(x.r.key) + (x.title ? ' <span class="muted">' + esc(x.title) + "</span>" : "") + "</button>";
+      }).join("") + "</div></div>" : "") +
+      (d.rulings.length ? '<div class="pv-row"><div class="pv-h">국세청 해석</div><div class="pv-list">' + d.rulings.map(function (x) {
+        return '<a href="' + esc(x.u) + '" target="_blank" rel="noopener">' + esc(x.t) + ' <span class="muted">↗</span></a>';
+      }).join("") + "</div></div>" : "") +
+      (d.secs.length ? '<div class="pv-row"><div class="pv-h">볼 강의 목차 · 사전</div><div class="pv-list">' + d.secs.map(function (c) {
+        return '<a href="' + (c.href || lecHref(c.lec, c.secId)) + '"><span class="pv-src">' + esc(c.short || c.lec.no + "강") + "</span> " + esc(c.heading) + "</a>";
+      }).join("") + "</div></div>" : "") +
+      '<div class="pv-row"><div class="pv-h">원문 사이트에서 찾기</div>' + outLinks(q) + "</div>";
+    box.querySelectorAll(".pv-law").forEach(function (b) {
+      b.onclick = function () { var x = d.laws[+b.dataset.i]; openLaw(x.r, x.lec); };
+    });
+    box.hidden = false;
+  }
+  function attachPreview(input, box) {
+    var t = null;
+    input.addEventListener("input", function () {
+      clearTimeout(t);
+      t = setTimeout(function () { renderPreview(box, input.value); }, 180);
+    });
+    if (input.value) renderPreview(box, input.value);
+    loadLaws(function (ok) { if (ok && input.value) renderPreview(box, input.value); });
+  }
+
   /* ---------- 화면들 ---------- */
   function sampleNotice() {
     if (!USING_SAMPLE) return "";
@@ -262,22 +436,24 @@ function main() {
 
   function viewHome() {
     var progress = courses().map(function (c) {
-      var done = c.items.length, total = c.total || done || 1, pct = Math.min(100, Math.round(done / total * 100));
+      var done = c.items.filter(function (l) { return !l.stub; }).length, total = c.total || done || 1, pct = Math.min(100, Math.round(done / total * 100));
       return '<div class="course-prog"><b>' + esc(c.category) + ' › ' + esc(c.site) + '</b>' +
         '<div class="progress"><span style="width:' + pct + '%"></span></div>' +
         '<span class="muted">' + (c.total ? c.total + '개 중 ' + done + '개 완료 (' + pct + '%)' : done + '개 정리됨') + '</span></div>';
     }).join("");
-    var recent = LECTURES.slice().sort(function (a, b) { return String(b.date || "").localeCompare(String(a.date || "")) || b.no - a.no; }).slice(0, 3);
+    var recent = LECTURES.filter(function (l) { return !l.stub; }).sort(function (a, b) { return String(b.date || "").localeCompare(String(a.date || "")) || b.no - a.no; }).slice(0, 3);
     app.innerHTML = sampleNotice() +
       '<h1 class="page-title">오늘도 한 걸음씩</h1>' +
       '<p class="page-sub">강의 요약과 실무 도구를 한곳에 모았어요.</p>' +
       '<div class="card course-progs">' + progress + '</div>' +
       '<h2 class="section-h">궁금한 내용 찾기</h2>' +
       '<form class="searchbox" id="homeSearch"><input name="q" placeholder="예: 신고기한 연장, 최초 사업연도" aria-label="검색어"><button class="btn">찾기</button></form>' +
+      '<div class="card preview" id="homePv" hidden aria-live="polite"></div>' +
       (recent.length ? '<h2 class="section-h">최근 추가된 요약</h2><div class="lec-list">' + recent.map(lecItem).join("") + "</div>" : "") +
       '<h2 class="section-h">메뉴</h2><div class="grid">' +
         tile("#/lectures", "📘", "강의 요약", "세목 › 강의 사이트 › 강의별로 요약과 거래처 Q&A를 모아 봐요.") +
-        tile("#/search", "🔎", "검색", "요약본 전체에서 답과 출처 강의를 찾아요.") +
+        tile("#/search", "🔎", "검색", "강의 요약·사전·세법 조문에서 찾고, 해석·판례로 이어 줘요.") +
+        tile("#/dict", "📖", "나의 세무 사전", "블로그 주제마다 조문과 실무 포인트를 덧붙였어요.") +
         tile("#/clients", "📊", "거래처 현황", "엑셀을 열어서 보기만 해요. 저장하지 않아요.", true) +
         tile("#/calculator", "🧮", "통합고용세액공제 계산기", "인원 변동으로 공제액을 계산해요.", true) +
       "</div>";
@@ -285,6 +461,7 @@ function main() {
       e.preventDefault();
       location.hash = "#/search?q=" + encodeURIComponent(this.q.value.trim());
     };
+    attachPreview(document.getElementById("homeSearch").q, document.getElementById("homePv"));
   }
   function tile(href, ico, title, desc, soon) {
     return '<a class="card tile" href="' + href + '"><div class="big">' + ico + "</div><h3>" + esc(title) +
@@ -292,10 +469,12 @@ function main() {
   }
   function lecItem(l) {
     var kw = (l.keywords || []).slice(0, 5).join(" · ");
-    return '<a class="card lec-item" href="' + lecHref(l) + '"><div class="lec-no">' + l.no + "</div><div><h3>" +
-      esc(l.title) + (l.date ? ' <span class="lec-date">(' + esc(l.date) + ')</span>' : "") +
-      (l.qa ? ' <span class="pill soon">Q&amp;A ' + qaList(l).length + '</span>' : "") + "</h3><p>" +
-      esc([l.length, kw].filter(Boolean).join("  |  ")) + "</p></div></a>";
+    return '<a class="card lec-item" href="' + lecHref(l, l.stub ? "my" : "") + '"><div class="lec-no">' + l.no + "</div><div><h3>" +
+      esc(l.title) + (l.lecture_date ? ' <span class="lec-date">(' + esc(l.lecture_date) + ')</span>' : "") +
+      (l.stub ? ' <span class="pill soon">요약 준비 중</span>' : "") +
+      (l.qa ? ' <span class="pill soon">Q&amp;A ' + qaList(l).length + '</span>' : "") +
+      (l.my ? ' <span class="pill mine">내 질문 ' + notesList(l, "my").length + '</span>' : "") + "</h3><p>" +
+      esc([l.date ? "요약 " + l.date : "", l.length, kw].filter(Boolean).join("  |  ")) + "</p></div></a>";
   }
 
   var lecCat = "";
@@ -339,12 +518,14 @@ function main() {
 
   /* ---------- 강의 머리(분류 경로)와 탭: 요약 | 거래처 Q&A ---------- */
   function lecHead(l, tab) {
-    var n = l.qa ? qaList(l).length : 0;
+    var n = l.qa ? qaList(l).length : 0, nm = l.my ? notesList(l, "my").length : 0;
     return '<div class="lec-head"><div class="crumbs"><a href="#/lectures">' + esc(l.category) + '</a> › ' + esc(l.site) +
-      ' › ' + esc(lecLabel(l)) + (l.date ? ' <span class="muted">(' + esc(l.date) + ')</span>' : "") + '</div>' +
+      ' › ' + esc(lecLabel(l)) + (l.lecture_date ? ' (' + esc(l.lecture_date) + ')' : "") +
+      (l.date ? ' <span class="muted">· 요약 ' + esc(l.date) + '</span>' : "") + '</div>' +
       '<div class="tabs" role="tablist">' +
       '<a role="tab" class="tab' + (tab === "sum" ? " on" : "") + '" href="' + lecHref(l) + '">강의 요약</a>' +
       '<a role="tab" class="tab' + (tab === "qa" ? " on" : "") + '" href="' + lecHref(l, "qa") + '">거래처 예상 질문' + (n ? " " + n : "") + '</a>' +
+      '<a role="tab" class="tab' + (tab === "my" ? " on" : "") + '" href="' + lecHref(l, "my") + '">내 질문' + (nm ? " " + nm : "") + '</a>' +
       "</div></div>";
   }
   function lecNav(l) {
@@ -355,35 +536,50 @@ function main() {
       (next ? '<a class="card next" href="' + lecHref(next) + '">' + esc(lecLabel(next)) + " →</a>" : "<span></span>") + "</div>";
   }
 
-  /* ---------- 거래처 예상 질문 (<이름>.qa.md: '## 질문' 아래에 답변) ---------- */
-  function qaList(l) {
-    if (l._qa) return l._qa;
+  /* ---------- 강의별 질문 탭 ----------
+     거래처 예상 질문: <이름>.qa.md / 내 질문: <이름>.my.md ('## 질문' 줄 아래에 답변) */
+  var NOTE_KIND = {
+    qa: { tab: "거래처 예상 질문", head: "거래처 질문", file: ".qa.md", q: "Q",
+      sub: "거래처에서 자주 물어볼 만한 질문을 강의 내용으로 답해 두었어요. 답변은 상황에 맞게 다듬어 쓰세요." },
+    my: { tab: "내 질문", head: "내 질문", file: ".my.md", q: "내",
+      sub: "강의를 듣다 궁금했던 점이에요. 답은 axtax로 현행 조문과 국세청 해석(서면질의 회신 등)을 찾아 달았어요. 근거 문서는 눌러서 원문을 볼 수 있어요." }
+  };
+  function notesList(l, kind) {
+    var key = "_" + kind;
+    if (l[key]) return l[key];
     var out = [], cur = null;
-    String(l.qa || "").split(/\r?\n/).forEach(function (line) {
+    String(l[kind] || "").split(/\r?\n/).forEach(function (line) {
       var m = line.match(/^##\s+(.*)$/);
       if (m) { cur = { q: m[1].replace(/^Q\d*[.)]\s*/, "").trim(), a: [] }; out.push(cur); return; }
       if (cur) cur.a.push(line);
     });
-    out.forEach(function (x, i) { x.a = x.a.join("\n").trim(); x.id = "qa-" + (i + 1); });
-    l._qa = out;
+    out.forEach(function (x, i) { x.a = x.a.join("\n").trim(); x.id = kind + "-" + (i + 1); });
+    l[key] = out;
     return out;
   }
-  function viewQA(l, openId) {
-    var list = qaList(l);
-    app.innerHTML = lecHead(l, "qa") +
-      '<p class="page-sub">거래처에서 자주 물어볼 만한 질문을 강의 내용으로 답해 두었어요. 답변은 상황에 맞게 다듬어 쓰세요.</p>' +
+  function qaList(l) { return notesList(l, "qa"); }
+  function viewQA(l, openId, kind) {
+    kind = kind || "qa";
+    var K = NOTE_KIND[kind], list = notesList(l, kind);
+    var base = String(l.file || "강의").replace(/\.(my\.)?md$/, "");
+    app.innerHTML = lecHead(l, kind) +
+      '<p class="page-sub">' + esc(K.sub) + '</p>' +
       (list.length ? '<div class="qa-list">' + list.map(function (x, i) {
-        return '<details class="card qa" id="' + x.id + '"' + (x.id === openId ? " open" : "") + '><summary><span class="qn">Q' + (i + 1) +
+        return '<details class="card qa" id="' + x.id + '"' + (x.id === openId || (kind === "my" && list.length === 1) ? " open" : "") + '><summary><span class="qn">' + K.q + (i + 1) +
           '</span><span class="qq">' + esc(x.q) + '</span></summary><div class="doc qa-a" data-i="' + i + '"></div></details>';
       }).join("") + "</div>" :
-      '<div class="card placeholder"><b>아직 질문이 없어요.</b><p class="muted" style="margin:6px 0 0">요약 폴더에 <code>' + esc(String(l.file || "강의").replace(/\.md$/, "")) +
-      '.qa.md</code> 파일이 생기면 여기에 보여요.</p></div>') + lecNav(l);
+      '<div class="card placeholder"><b>아직 질문이 없어요.</b><p class="muted" style="margin:6px 0 0">' +
+      (kind === "my" ? "궁금한 점을 클로드에게 말해 주면 답을 찾아 여기에 달아 둘게요. (요약 폴더의 <code>" + esc(base) + ".my.md</code>)" :
+        "요약 폴더에 <code>" + esc(base) + ".qa.md</code> 파일이 생기면 여기에 보여요.") + '</p></div>') + lecNav(l);
     app.querySelectorAll(".qa-a").forEach(function (box) {
-      var md = renderMarkdown(list[+box.dataset.i].a);
+      var x = list[+box.dataset.i];
+      if (!x.a) { box.innerHTML = '<p class="muted">아직 답을 달지 않았어요.</p>'; return; }
+      var md = renderMarkdown(x.a);
       box.appendChild(md);
       bindLaws(md, l);
+      md.querySelectorAll('a[href^="http"]').forEach(function (a) { a.target = "_blank"; a.rel = "noopener"; });
     });
-    document.title = lecLabel(l) + " 거래처 질문 · 숫자곳간";
+    document.title = lecLabel(l) + " " + K.head + " · 숫자곳간";
     var t = openId && document.getElementById(openId);
     if (t) { t.scrollIntoView(); t.classList.add("flash"); } else window.scrollTo(0, 0);
   }
@@ -426,6 +622,10 @@ function main() {
   }
   function openLaw(r, l) {
     var laws = (l && l.laws) || {}, arts = laws.articles || {}, note = arts[r.key];
+    if (!note) LECTURES.some(function (o) {
+      var a = o.laws && o.laws.articles;
+      if (a && a[r.key]) { laws = o.laws; note = a[r.key]; return true; }
+    });
     var sheet = document.getElementById("lawSheet");
     if (!sheet) {
       sheet = document.createElement("div");
@@ -435,22 +635,35 @@ function main() {
       sheet.querySelector(".ls-scrim").onclick = function () { sheet.hidden = true; };
       document.addEventListener("keydown", function (e) { if (e.key === "Escape") sheet.hidden = true; });
     }
+    var art = findArticle(r.key);
     sheet.querySelector(".ls-box").innerHTML =
-      '<div class="ls-top"><h3 id="lsTitle">' + esc(r.key) + '</h3><button type="button" class="btn ghost ls-x" aria-label="닫기">닫기</button></div>' +
+      '<div class="ls-top"><h3 id="lsTitle">' + esc(r.key) + (art && art.title ? " (" + esc(art.title) + ")" : "") + '</h3><button type="button" class="btn ghost ls-x" aria-label="닫기">닫기</button></div>' +
       (note ? '<div class="ls-label">현행 조문 요지</div><p class="ls-note">' + esc(note) + '</p>' +
-        '<p class="muted ls-src">' + esc(laws.source || "krlaw") + " 기준 · " + esc(laws.checked || "") + " 확인</p>"
-        : '<p class="muted">이 강의에 정리된 현행 요지가 아직 없어요. 아래에서 현행 원문을 바로 볼 수 있어요.</p>') +
+        '<p class="muted ls-src">' + esc(laws.source || "krlaw") + " 기준 · " + esc(laws.checked || "") + " 확인</p>" : "") +
+      (art ? '<div class="ls-label">현행 조문 전문</div><div class="ls-full">' + esc(art.text) + '</div>' +
+        '<p class="muted ls-src">시행 ' + esc(String(art.ef).replace(/^(\d{4})(\d{2})(\d{2})$/, "$1.$2.$3")) + " 판 · " + esc((window.LAWS || {}).built || "") + " 받음</p>"
+        : (note ? "" : '<p class="muted">곳간에 담긴 조문이 아니에요. 아래에서 현행 원문을 바로 볼 수 있어요.</p>')) +
       '<a class="btn" href="' + lawUrl(r) + '" target="_blank" rel="noopener">국가법령정보센터에서 현행 원문 보기</a>';
     sheet.querySelector(".ls-x").onclick = function () { sheet.hidden = true; };
     sheet.hidden = false;
     sheet.querySelector(".ls-x").focus();
+    if (!art && !window.LAWS && !loadLaws.failed) loadLaws(function (ok) { if (ok && findArticle(r.key)) openLaw(r, l); });
+  }
+
+  function viewStub(l) {
+    app.innerHTML = lecHead(l, "sum") + '<div class="card placeholder"><b>이 강의는 아직 요약 전이에요.</b>' +
+      '<p class="muted" style="margin:6px 0 0">요약본이 올라오면 여기에 보여요. 먼저 적어 둔 질문은 <a href="' + lecHref(l, "my") + '">내 질문</a> 탭에 있어요.</p></div>' + lecNav(l);
+    document.title = lecLabel(l) + " · 숫자곳간";
+    window.scrollTo(0, 0);
   }
 
   var spy = null;
   function viewLecture(id, secId) {
     var l = findLecture(id);
     if (!l) { app.innerHTML = '<p>요약본을 찾지 못했어요. <a href="#/lectures">목록으로</a></p>'; return; }
-    if (secId && /^qa(-\d+)?$/.test(secId)) { viewQA(l, secId === "qa" ? "" : secId); return; }
+    var nm = secId && secId.match(/^(qa|my)(-\d+)?$/);
+    if (nm) { viewQA(l, nm[2] ? secId : "", nm[1]); return; }
+    if (l.stub) { viewStub(l); return; }
     if (l.html) { viewLectureHtml(l, secId); return; }
     var body = renderMarkdown(l.md);
     var heads = body.querySelectorAll("h2, h3");
@@ -576,44 +789,107 @@ function main() {
     kws = kws.sort(function () { return Math.random() - 0.5; }).slice(0, 12);
     app.innerHTML = sampleNotice() +
       '<h1 class="page-title">검색</h1>' +
-      '<p class="page-sub">요약본 전체에서 가장 가까운 내용과 출처 강의를 찾아 드려요.</p>' +
+      '<p class="page-sub">강의 요약·거래처 질문·내 질문과 주요 세법 조문 전체에서 찾고, 국세청 해석과 판례는 원문 사이트로 바로 이어 드려요. 단어만 넣어도 아래에 볼 조문과 강의 목차가 바로 보여요.</p>' +
       '<form class="searchbox" id="searchForm"><input name="q" id="q" placeholder="예: 외부감사 끝나지 않으면 신고기한 연장" aria-label="검색어" value="' + esc(q) + '"><button class="btn">찾기</button></form>' +
+      '<div class="card preview" id="pv" hidden aria-live="polite"></div>' +
       (kws.length ? '<div class="chips">' + kws.map(function (k) { return '<a class="chip" href="#/search?q=' + encodeURIComponent(k) + '">' + esc(k) + "</a>"; }).join("") + "</div>" : "") +
       '<div id="results" style="margin-top:22px"></div>';
     var form = document.getElementById("searchForm");
+    attachPreview(form.q, document.getElementById("pv"));
     form.onsubmit = function (e) {
       e.preventDefault();
       location.hash = "#/search?q=" + encodeURIComponent(form.q.value.trim());
     };
     if (!q) { document.getElementById("q").focus(); return; }
     var r = search(q), box = document.getElementById("results");
+    box.innerHTML = "";
+    var lawBox = document.createElement("div");
+    function drawLaws() {
+      var hits = searchLaws(q, 8), terms = lawTerms(q);
+      lawBox.innerHTML = '<h2 class="section-h">법령 조문' + (hits.length ? " " + hits.length + "개" : "") + '</h2>' +
+        (hits.length ? hits.map(function (a, i) {
+          return '<button type="button" class="card result law-hit" data-i="' + i + '"><div class="src">' + esc(a.law) + (a.chapter ? " · " + esc(a.chapter) : "") +
+            "</div><h4>" + esc(a.no) + (a.title ? " (" + esc(a.title) + ")" : "") + "</h4><p>" + esc(snippet(a.text, terms.length ? terms : [""], 160)) + "</p></button>";
+        }).join("") : (window.LAWS ? '<p class="muted">곳간에 담긴 세법 조문에서는 찾지 못했어요.</p>' :
+          '<p class="muted">' + (loadLaws.failed ? "아직 법령 조문을 받지 않았어요. PC에서 사이트_업데이트.bat 을 한 번 실행하면 주요 세법 조문이 들어와요." : "법령 조문을 불러오는 중이에요…") + "</p>")) +
+        '<h2 class="section-h">국세청 해석 · 판례</h2><p class="muted" style="margin:0 0 8px">같은 검색어로 원문 사이트를 새 탭에서 열어요.</p>' + outLinks(q);
+      lawBox.querySelectorAll(".law-hit").forEach(function (b) {
+        b.onclick = function () { var a = hits[+b.dataset.i]; openLaw({ law: a.law, article: a.no, key: a.key }, null); };
+      });
+      lawBox.querySelectorAll(".law-hit").forEach(function (b) { highlight(b, terms); });
+    }
     if (!r.results.length) {
-      box.innerHTML = '<p class="muted">"' + esc(q) + '"와 맞는 내용을 찾지 못했어요. 더 짧은 단어로 찾아보세요.</p>';
+      box.innerHTML = '<p class="muted">강의 요약과 질문에서는 "' + esc(q) + '"와 맞는 내용을 찾지 못했어요.</p>';
+      box.appendChild(lawBox);
+      drawLaws();
+      loadLaws(function () { drawLaws(); });
       return;
     }
     var top = r.results[0].c;
     var topMd = top.md.length > 1500 ? top.md.slice(0, top.md.lastIndexOf("\n", 1500)) + "\n\n…" : top.md;
     var ans = document.createElement("div");
     ans.className = "card answer";
-    ans.innerHTML = '<div class="label">가장 가까운 내용</div><h3>' + esc(lecLabel(top.lec)) + " › " + esc(top.heading) +
-      '</h3><div class="doc" id="ansBody"></div><p style="margin:12px 0 0"><a class="btn" href="' + lecHref(top.lec, top.secId) +
-      '">본문에서 보기</a></p><p class="muted" style="font-size:13px;margin:10px 0 0">요약본에 적힌 내용을 그대로 찾아 보여 드려요. 실제 적용 전에는 조문을 한 번 더 확인하세요.</p>';
+    ans.innerHTML = '<div class="label">강의 요약·질문·사전에서 가장 가까운 내용</div><h3>' + esc(top.src || lecLabel(top.lec)) + " › " + esc(top.heading) +
+      '</h3><div class="doc" id="ansBody"></div><p style="margin:12px 0 0"><a class="btn" href="' + (top.href || lecHref(top.lec, top.secId)) +
+      '">본문에서 보기</a></p><p class="muted" style="font-size:13px;margin:10px 0 0">강의 요약·질문에 적힌 내용을 그대로 찾아 보여 드려요. 실제 적용 전에는 조문을 한 번 더 확인하세요.</p>';
     var rendered = renderMarkdown(topMd);
     rendered.querySelectorAll("h2, h3").forEach(function (h) { h.remove(); });
     ans.querySelector("#ansBody").appendChild(rendered);
     highlight(rendered, r.terms);
-    box.innerHTML = "";
     box.appendChild(ans);
+    box.appendChild(lawBox);
+    drawLaws();
+    loadLaws(function () { drawLaws(); });
     if (r.results.length > 1) {
       var more = document.createElement("div");
       more.innerHTML = '<h2 class="section-h">다른 관련 내용 ' + (r.results.length - 1) + "개</h2>" +
         r.results.slice(1).map(function (x) {
-          return '<a class="card result" href="' + lecHref(x.c.lec, x.c.secId) + '"><div class="src">' + esc(lecLabel(x.c.lec)) +
+          return '<a class="card result" href="' + (x.c.href || lecHref(x.c.lec, x.c.secId)) + '"><div class="src">' + esc(x.c.src || lecLabel(x.c.lec)) +
             "</div><h4>" + esc(x.c.heading) + "</h4><p>" + esc(snippet(plain(x.c.md), r.terms)) + "</p></a>";
         }).join("");
       highlight(more, r.terms);
       box.appendChild(more);
     }
+  }
+
+  /* ---------- 나의 세무 사전 (블로그 주제마다 조문·실무를 덧붙인 내 사전) ---------- */
+  function viewDict() {
+    var cats = [];
+    DICT.forEach(function (d) { if (cats.indexOf(d.category) === -1) cats.push(d.category); });
+    app.innerHTML = '<h1 class="page-title">나의 세무 사전</h1>' +
+      '<p class="page-sub">블로그에 쉽게 풀어 쓴 주제마다 조문·해석·실무 포인트를 덧붙였어요. 조문을 누르면 현행 조문이 떠요.</p>' +
+      (DICT.length ? '<div class="searchbox"><input id="dictFilter" placeholder="주제나 단어로 거르기" aria-label="사전 거르기"></div><div id="dictList"></div>' :
+        '<div class="card placeholder"><b>아직 사전 항목이 없어요.</b><p class="muted" style="margin:6px 0 0">블로그 주제를 알려 주면 클로드가 항목을 만들어 \'나의 업무 노트\\사전\' 폴더에 넣어 둬요.</p></div>');
+    if (!DICT.length) return;
+    function draw(f) {
+      f = String(f || "").toLowerCase();
+      document.getElementById("dictList").innerHTML = cats.map(function (c) {
+        var items = DICT.filter(function (d) { return d.category === c && (!f || (d.title + " " + (d.keywords || []).join(" ") + " " + d.md).toLowerCase().indexOf(f) !== -1); });
+        if (!items.length) return "";
+        return '<h2 class="section-h">' + esc(c) + ' <span class="muted">' + items.length + '</span></h2><div class="lec-list">' + items.map(function (d) {
+          return '<a class="card lec-item" href="' + dictHref(d) + '"><div class="lec-no">📖</div><div><h3>' + esc(d.title) + '</h3><p>' +
+            esc([d.blog_date ? "블로그 " + d.blog_date : "", (d.keywords || []).slice(0, 5).join(" · ")].filter(Boolean).join("  |  ")) + "</p></div></a>";
+        }).join("") + "</div>";
+      }).join("") || '<p class="muted">맞는 항목이 없어요.</p>';
+    }
+    draw("");
+    document.getElementById("dictFilter").oninput = function () { draw(this.value); };
+  }
+  function viewDictEntry(id, sec) {
+    var d = DICT.filter(function (x) { return x.id === id; })[0];
+    if (!d) { app.innerHTML = '<p>사전 항목을 찾지 못했어요. <a href="#/dict">사전으로</a></p>'; return; }
+    app.innerHTML = '<div class="lec-head"><div class="crumbs"><a href="#/dict">나의 세무 사전</a> › ' + esc(d.category) + '</div></div>' +
+      '<h1 class="page-title">' + esc(d.title) + '</h1>' +
+      (d.blog ? '<p style="margin:0 0 14px"><a class="btn ghost" href="' + esc(d.blog) + '" target="_blank" rel="noopener">블로그 글 보기 ↗</a>' +
+        (d.blog_date ? ' <span class="muted">' + esc(d.blog_date) + ' 발행</span>' : "") + "</p>" : "") +
+      '<article class="card doc" id="dictBody"></article>';
+    var body = renderMarkdown(d.md);
+    document.getElementById("dictBody").appendChild(body);
+    bindLaws(body, d._lec);
+    body.querySelectorAll('a[href^="http"]').forEach(function (a) { a.target = "_blank"; a.rel = "noopener"; });
+    document.title = d.title + " · 나의 세무 사전";
+    var t = sec && document.getElementById(sec);
+    if (t) { t.scrollIntoView(); t.classList.add("flash"); } else window.scrollTo(0, 0);
   }
 
   function viewClients() {
@@ -645,6 +921,7 @@ function main() {
     else if (nav === "lecture") { nav = "lectures"; viewLecture(parts[1], parts[2]); }
     else if (nav === "search") viewSearch((query.match(/(?:^|&)q=([^&]*)/) || [])[1] || "");
     else if (nav === "clients") viewClients();
+    else if (nav === "dict") { if (parts[1]) viewDictEntry(parts[1], parts[2]); else viewDict(); }
     else if (nav === "calculator") viewCalculator();
     else { nav = "home"; viewHome(); }
     document.querySelectorAll(".sidenav a").forEach(function (a) { a.classList.toggle("active", a.dataset.nav === nav); });
@@ -665,7 +942,7 @@ function main() {
   document.getElementById("menuBtn").onclick = function () { document.body.classList.toggle("nav-open"); };
   document.getElementById("scrim").onclick = function () { document.body.classList.remove("nav-open"); };
   document.getElementById("navFoot").textContent = USING_SAMPLE ? "예시 데이터로 보는 중" :
-    "요약본 " + LECTURES.length + "개" + (META.built ? " · " + META.built + " 업데이트" : "") + (META.public ? " · 공개용" : "");
+    "요약본 " + LECTURES.filter(function (l) { return !l.stub; }).length + "개" + (META.built ? " · " + META.built + " 업데이트" : "") + (META.public ? " · 공개용" : "");
 
   if (!document.getElementById("stackCss")) {
     var st = document.createElement("style"); st.id = "stackCss"; st.textContent = STACK_CSS; document.head.appendChild(st);
