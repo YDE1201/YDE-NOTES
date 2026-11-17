@@ -526,7 +526,7 @@ function main() {
       '<a role="tab" class="tab' + (tab === "sum" ? " on" : "") + '" href="' + lecHref(l) + '">강의 요약</a>' +
       '<a role="tab" class="tab' + (tab === "qa" ? " on" : "") + '" href="' + lecHref(l, "qa") + '">거래처 예상 질문' + (n ? " " + n : "") + '</a>' +
       '<a role="tab" class="tab' + (tab === "my" ? " on" : "") + '" href="' + lecHref(l, "my") + '">내 질문' + (nm ? " " + nm : "") + '</a>' +
-      "</div></div>";
+      "</div>" + askButton("lecture", l.id, lecLabel(l)) + "</div>";
   }
   function lecNav(l) {
     var i = LECTURES.indexOf(l), prev = LECTURES[i - 1], next = LECTURES[i + 1];
@@ -879,7 +879,7 @@ function main() {
     var d = DICT.filter(function (x) { return x.id === id; })[0];
     if (!d) { app.innerHTML = '<p>사전 항목을 찾지 못했어요. <a href="#/dict">사전으로</a></p>'; return; }
     app.innerHTML = '<div class="lec-head"><div class="crumbs"><a href="#/dict">나의 세무 사전</a> › ' + esc(d.category) + '</div></div>' +
-      '<h1 class="page-title">' + esc(d.title) + '</h1>' +
+      '<h1 class="page-title">' + esc(d.title) + '</h1>' + askButton("dict", d.id, d.title) +
       (d.blog ? '<p style="margin:0 0 14px"><a class="btn ghost" href="' + esc(d.blog) + '" target="_blank" rel="noopener">블로그 글 보기 ↗</a>' +
         (d.blog_date ? ' <span class="muted">' + esc(d.blog_date) + ' 발행</span>' : "") + "</p>" : "") +
       '<article class="card doc" id="dictBody"></article>';
@@ -909,6 +909,92 @@ function main() {
       "</ul></div>";
   }
 
+  /* ---------- 질문 남기기 ----------
+     사이트는 서버가 없어서 질문을 이 브라우저(localStorage)에 모아 둬요. PC와 휴대폰은 따로 모여요.
+     '클로드에게 보낼 질문 복사'로 복사해 대화창에 붙이면, 답은 강의의 '내 질문' 탭이나 사전에 들어와요. */
+  var ASK_KEY = "my-questions";
+  function askLoad() { try { return JSON.parse(store(ASK_KEY) || "[]") || []; } catch (e) { return []; } }
+  function askSave(list) { store(ASK_KEY, JSON.stringify(list)); }
+  function askNorm(s) { return String(s || "").replace(/[\s?.!,·~"'()]/g, "").slice(0, 18); }
+  function askAnswered(q) {
+    var key = askNorm(q.text);
+    if (!key) return null;
+    for (var i = 0; i < LECTURES.length; i++) {
+      var l = LECTURES[i], hit = l.my && notesList(l, "my").filter(function (x) { return askNorm(x.q).indexOf(key) !== -1 || key.indexOf(askNorm(x.q)) === 0 && askNorm(x.q).length > 8; })[0];
+      if (hit) return { href: lecHref(l, hit.id), label: lecLabel(l) + " · 내 질문" };
+    }
+    return null;
+  }
+  function askButton(type, id, label) {
+    return '<button class="btn ghost ask-btn" type="button" data-ask-type="' + esc(type) + '" data-ask-id="' + esc(id) + '" data-ask-label="' + esc(label) + '">✍ 질문 남기기</button>';
+  }
+  function askForm(type, id, label) {
+    return '<div class="card ask-form"><label for="askText"><b>질문 남기기</b> <span class="muted">' + esc(label || "일반 질문") + '</span></label>' +
+      '<textarea id="askText" rows="3" placeholder="궁금한 점을 적어 두세요. 나중에 클로드에게 한꺼번에 물어봐요."></textarea>' +
+      '<div class="ask-row"><button class="btn" type="button" id="askSave">저장</button>' + (type === "free" ? "" : '<a class="btn ghost" href="#/ask">내 질문함 보기</a>') + '<span class="muted" id="askMsg" role="status"></span></div></div>';
+  }
+  function bindAskForm(host, type, id, label) {
+    host.querySelector("#askSave").onclick = function () {
+      var t = host.querySelector("#askText").value.trim();
+      if (!t) { host.querySelector("#askText").focus(); return; }
+      var list = askLoad();
+      list.push({ id: Date.now().toString(36), text: t, type: type, ref: id, label: label, at: new Date().toISOString().slice(0, 10) });
+      askSave(list);
+      host.querySelector("#askText").value = "";
+      host.querySelector("#askMsg").textContent = "저장했어요 (질문함 " + list.length + "개)";
+      if (location.hash.indexOf("#/ask") === 0) viewAsk();
+    };
+  }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest(".ask-btn");
+    if (!b) return;
+    var old = document.querySelector(".ask-slot");
+    if (old) { old.remove(); return; }
+    var slot = document.createElement("div"); slot.className = "ask-slot";
+    slot.innerHTML = askForm(b.dataset.askType, b.dataset.askId, b.dataset.askLabel);
+    b.insertAdjacentElement("afterend", slot);
+    bindAskForm(slot, b.dataset.askType, b.dataset.askId, b.dataset.askLabel);
+    slot.querySelector("textarea").focus();
+  });
+  function askHref(q) {
+    if (q.type === "lecture") { var l = LECTURES.filter(function (x) { return x.id === q.ref; })[0]; return l ? lecHref(l) : ""; }
+    if (q.type === "dict") return "#/dict/" + encodeURIComponent(q.ref);
+    return "";
+  }
+  function askCopyText(list) {
+    return "곳간 질문함에서 보낸 질문이에요. axtax(현행 조문·국세청 해석)로 답을 찾아 강의는 '내 질문' 탭(.my.md), 사전은 해당 항목에 넣어 주세요.\n\n" +
+      list.map(function (q, i) { return (i + 1) + ". [" + (q.label || "일반") + "] " + q.text; }).join("\n");
+  }
+  function viewAsk() {
+    var list = askLoad();
+    var open = list.filter(function (q) { return !askAnswered(q); }), done = list.filter(function (q) { return askAnswered(q); });
+    function row(q) {
+      var h = askHref(q), ans = askAnswered(q);
+      return '<div class="card ask-item"><div><p class="ask-q">' + esc(q.text) + '</p><p class="muted">' +
+        (h ? '<a href="' + h + '">' + esc(q.label) + '</a>' : esc(q.label || "일반 질문")) + " · " + esc(q.at || "") +
+        (ans ? ' · <a class="pill mine" href="' + ans.href + '">답변 보기</a>' : "") + '</p></div>' +
+        '<button class="btn ghost" type="button" data-del="' + esc(q.id) + '" aria-label="질문 지우기">지우기</button></div>';
+    }
+    app.innerHTML = '<h1 class="page-title">내 질문함</h1>' +
+      '<p class="page-sub">강의나 사전을 보다 남긴 질문이 모여요. 복사해서 클로드에게 붙여 넣으면 답을 찾아 강의의 \'내 질문\' 탭이나 사전에 넣어 줘요. 질문은 이 기기의 브라우저에만 저장돼요(PC와 휴대폰은 따로).</p>' +
+      '<div id="askFree">' + askForm("free", "", "일반 질문") + '</div>' +
+      '<h2 class="section-h">답을 기다리는 질문 <span class="muted">' + open.length + '</span></h2>' +
+      (open.length ? '<p><button class="btn" type="button" id="askCopy">클로드에게 보낼 질문 복사</button> <span class="muted" id="askCopyMsg" role="status"></span></p>' +
+        '<textarea id="askCopyBox" class="ask-copybox" readonly hidden></textarea>' + open.map(row).join("") : '<p class="muted">남은 질문이 없어요.</p>') +
+      (done.length ? '<h2 class="section-h">답이 달린 질문 <span class="muted">' + done.length + '</span></h2>' + done.map(row).join("") : "");
+    bindAskForm(document.getElementById("askFree"), "free", "", "일반 질문");
+    var cp = document.getElementById("askCopy");
+    if (cp) cp.onclick = function () {
+      var text = askCopyText(open), msg = document.getElementById("askCopyMsg"), box = document.getElementById("askCopyBox");
+      function fallback() { box.hidden = false; box.value = text; box.focus(); box.select(); msg.textContent = "아래 글을 길게 눌러 복사해 주세요."; }
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { msg.textContent = "복사했어요. 클로드 대화창에 붙여 넣으세요."; }, fallback);
+      else fallback();
+    };
+    app.querySelectorAll("[data-del]").forEach(function (b) {
+      b.onclick = function () { askSave(askLoad().filter(function (q) { return q.id !== b.dataset.del; })); viewAsk(); };
+    });
+  }
+
   /* ---------- 길 찾기(라우터) ---------- */
   function route() {
     var h = decodeURIComponent(location.hash.replace(/^#\/?/, ""));
@@ -923,6 +1009,7 @@ function main() {
     else if (nav === "clients") viewClients();
     else if (nav === "dict") { if (parts[1]) viewDictEntry(parts[1], parts[2]); else viewDict(); }
     else if (nav === "calculator") viewCalculator();
+    else if (nav === "ask") viewAsk();
     else { nav = "home"; viewHome(); }
     document.querySelectorAll(".sidenav a").forEach(function (a) { a.classList.toggle("active", a.dataset.nav === nav); });
     if (parts[0] !== "lecture") window.scrollTo(0, 0);

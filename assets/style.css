@@ -227,3 +227,13 @@ mark { background: var(--mark); color: inherit; padding: 0 2px; border-radius: 3
 button.result { display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
 .ls-full { white-space: pre-wrap; font-size: 14.5px; line-height: 1.75; max-height: 50vh; overflow-y: auto; background: var(--surface-2); border-radius: 10px; padding: 12px 14px; margin: 0 0 8px; }
 .pv-law .muted { font-size: 12.5px; }
+
+/* 질문 남기기 */
+.ask-btn{margin:10px 0 4px}
+.ask-form{display:flex;flex-direction:column;gap:8px;margin:8px 0 14px}
+.ask-form textarea,.ask-copybox{width:100%;box-sizing:border-box;font:inherit;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:inherit;resize:vertical}
+.ask-copybox{min-height:120px;margin-bottom:10px}
+.ask-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ask-item{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:8px}
+.ask-item p{margin:0}
+.ask-q{white-space:pre-wrap;font-weight:600;margin-bottom:4px!important}
