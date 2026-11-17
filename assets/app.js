@@ -867,7 +867,7 @@ function main() {
         var items = DICT.filter(function (d) { return d.category === c && (!f || (d.title + " " + (d.keywords || []).join(" ") + " " + d.md).toLowerCase().indexOf(f) !== -1); });
         if (!items.length) return "";
         return '<h2 class="section-h">' + esc(c) + ' <span class="muted">' + items.length + '</span></h2><div class="lec-list">' + items.map(function (d) {
-          return '<a class="card lec-item" href="' + dictHref(d) + '"><div class="lec-no">📖</div><div><h3>' + esc(d.title) + '</h3><p>' +
+          return '<a class="card lec-item" href="' + dictHref(d) + '"><div class="lec-no">📖</div><div><h3>' + esc(d.title) + (d.draft ? ' <span class="pill soon">살 붙이기 전</span>' : "") + '</h3><p>' +
             esc([d.blog_date ? "블로그 " + d.blog_date : "", (d.keywords || []).slice(0, 5).join(" · ")].filter(Boolean).join("  |  ")) + "</p></div></a>";
         }).join("") + "</div>";
       }).join("") || '<p class="muted">맞는 항목이 없어요.</p>';
