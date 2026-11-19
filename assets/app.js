@@ -913,7 +913,7 @@ function main() {
      사이트는 서버가 없어서 질문을 이 브라우저(localStorage)에 모아 둬요. PC와 휴대폰은 따로 모여요.
      '클로드에게 보낼 질문 복사'로 복사해 대화창에 붙이면, 답은 강의의 '내 질문' 탭이나 사전에 들어와요. */
   var ASK_KEY = "my-questions";
-  var ASK_URL = "https://claude.ai/artifact/3eEyXia4PWenuQD7bGXmRK";  /* 모든 기기에서 같이 쓰는 Claude 질문함 */
+  var ASK_URL = "https://claude.ai/artifact/BozdmExwUqPrC526bARYzG";  /* 모든 기기에서 같이 쓰는 Claude 질문함 */
   function askLoad() { try { return JSON.parse(store(ASK_KEY) || "[]") || []; } catch (e) { return []; } }
   function askSave(list) { store(ASK_KEY, JSON.stringify(list)); }
   function askNorm(s) { return String(s || "").replace(/[\s?.!,·~"'()]/g, "").slice(0, 18); }
@@ -977,8 +977,8 @@ function main() {
         '<button class="btn ghost" type="button" data-del="' + esc(q.id) + '" aria-label="질문 지우기">지우기</button></div>';
     }
     app.innerHTML = '<h1 class="page-title">내 질문함</h1>' +
-      '<div class="card ask-form"><b>이제 질문은 Claude 질문함에 적어요</b><p class="muted" style="margin:0">노트북·PC·휴대폰 어디서 적어도 한 곳에 모이고, 클로드가 바로 읽어요. 다 적은 뒤 클로드에게 "질문함 답해 줘"라고만 하면 돼요.</p>' +
-      '<p style="margin:0"><a class="btn" href="' + ASK_URL + '" target="_blank" rel="noopener">Claude 질문함 열기 ↗</a></p></div>' +
+      '<div class="card ask-form"><b>질문은 Claude의 \'숫자곳간 바로가기\' 질문함에 적어요</b><p class="muted" style="margin:0">노트북·PC·휴대폰 어디서 적어도 한 곳에 모이고, 클로드가 바로 읽어요. 다 적은 뒤 클로드에게 "질문함 답해 줘"라고만 하면 돼요.</p>' +
+      '<p style="margin:0"><a class="btn" href="' + ASK_URL + '" target="_blank" rel="noopener">질문함 열기 ↗</a></p></div>' +
       (list.length ? '<h2 class="section-h">이 기기에 남아 있는 예전 질문</h2><p class="muted">예전 방식으로 이 브라우저에만 저장된 질문이에요. 복사해서 클로드에게 보내거나 지워 주세요.</p><div id="askFree" hidden>' + askForm("free", "", "일반 질문") + '</div>' : '<div id="askFree" hidden>' + askForm("free", "", "일반 질문") + '</div>') +
       '<h2 class="section-h">답을 기다리는 질문 <span class="muted">' + open.length + '</span></h2>' +
       (open.length ? '<p><button class="btn" type="button" id="askCopy">클로드에게 보낼 질문 복사</button> <span class="muted" id="askCopyMsg" role="status"></span></p>' +
