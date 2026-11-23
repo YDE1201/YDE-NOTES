@@ -893,13 +893,57 @@ function main() {
     if (t) { t.scrollIntoView(); t.classList.add("flash"); } else window.scrollTo(0, 0);
   }
 
+  /* ---------- 거래처 현황 ----------
+     data/clients.js(window.CLIENTS)는 PC에만 있어요. 인터넷용 곳간에는 복사하지 않아요(build_site.py 가 빼요).
+     주민등록번호·자택 주소는 처음부터 넣지 않아요. 비밀번호도 넣지 않아요. */
+  function loadClients(cb) {
+    if (window.CLIENTS) { cb(true); return; }
+    if (loadClients.failed) { cb(false); return; }
+    var sc = document.createElement("script");
+    sc.src = "data/clients.js";
+    sc.onload = function () { cb(!!window.CLIENTS); };
+    sc.onerror = function () { loadClients.failed = true; cb(false); };
+    document.head.appendChild(sc);
+  }
   function viewClients() {
-    app.innerHTML = '<h1 class="page-title">거래처 현황</h1><p class="page-sub">준비 중이에요. 무엇을 보고 싶은지 함께 정한 뒤 만들어요.</p>' +
-      '<div class="card placeholder"><b>이렇게 만들 계획이에요</b><ul>' +
-      "<li>내 컴퓨터의 거래처 엑셀(또는 CSV)을 <b>그때그때 열어서 보기만</b> 해요.</li>" +
-      "<li>열어 본 자료는 사이트나 GitHub 어디에도 <b>저장되지 않아요.</b> 창을 닫으면 사라져요.</li>" +
-      "<li>예: 신고 마감 일정, 기장 진행 상황, 결산 월별 거래처 수, 외감 대상 경계 거래처 표시</li>" +
-      "</ul></div>";
+    app.innerHTML = '<h1 class="page-title">거래처 현황</h1><p class="page-sub">불러오는 중이에요…</p>';
+    loadClients(function (ok) {
+      if (!ok) {
+        app.innerHTML = '<h1 class="page-title">거래처 현황</h1>' +
+          '<div class="card placeholder"><b>이 화면은 내 PC의 곳간에서만 열려요.</b><p class="muted" style="margin:6px 0 0">거래처 자료는 인터넷(휴대폰용 곳간)에 올리지 않아요. PC에서 사이트_열기로 열어 주세요.</p></div>';
+        return;
+      }
+      var C = window.CLIENTS, list = (C.clients || []).slice().sort(function (a, b) { return a.name.localeCompare(b.name, "ko"); });
+      var nCorp = list.filter(function (c) { return c.type === "법인"; }).length;
+      app.innerHTML = '<h1 class="page-title">거래처 현황</h1>' +
+        '<p class="page-sub">기장 중인 거래처 ' + list.length + '곳 (법인 ' + nCorp + ' · 개인 ' + (list.length - nCorp) + '). ' +
+        esc(C.source || "") + (C.built ? " · " + esc(C.built) + " 기준" : "") + '. 이 PC에서만 보여요.</p>' +
+        '<div class="searchbox"><input id="clFilter" placeholder="상호, 업종, 대표자, 사업자번호로 찾기" aria-label="거래처 찾기"></div>' +
+        '<div class="tabs" role="group" aria-label="구분" id="clType"><a class="tab on" data-t="">전체</a><a class="tab" data-t="법인">법인</a><a class="tab" data-t="개인">개인</a></div>' +
+        '<div id="clList" class="lec-list"></div>';
+      var type = "";
+      function draw() {
+        var f = String(document.getElementById("clFilter").value || "").toLowerCase().replace(/-/g, "");
+        var rows = list.filter(function (c) {
+          if (type && c.type !== type) return false;
+          if (!f) return true;
+          return [c.name, c.biz, c.item, c.ceo, c.bizno, c.office].join(" ").toLowerCase().replace(/-/g, "").indexOf(f) !== -1;
+        });
+        document.getElementById("clList").innerHTML = rows.length ? rows.map(function (c) {
+          return '<details class="card client"><summary><div class="cl-top"><b>' + esc(c.name) + '</b> <span class="pill">' + esc(c.type) + '</span></div>' +
+            '<p class="muted">' + esc([c.biz, c.item].filter(Boolean).join(" · ")) + '</p></summary>' +
+            '<dl class="cl-dl">' +
+            [["대표자", c.ceo], ["사업자번호", c.bizno], ["관할서", c.office], ["전화", c.tel], ["사업장", c.addr], ["수임처 담당", c.manager], ["세무대리 담당", c.agent], ["회사 코드", c.code]]
+              .filter(function (x) { return x[1]; }).map(function (x) { return "<dt>" + x[0] + "</dt><dd>" + esc(x[1]) + "</dd>"; }).join("") +
+            '</dl><p style="margin:10px 0 0"><a class="btn ghost" href="https://hometax.go.kr" target="_blank" rel="noopener">홈택스 열기 ↗</a></p></details>';
+        }).join("") : '<p class="muted">맞는 거래처가 없어요.</p>';
+      }
+      document.getElementById("clFilter").oninput = draw;
+      document.querySelectorAll("#clType .tab").forEach(function (t) {
+        t.onclick = function () { type = t.dataset.t; document.querySelectorAll("#clType .tab").forEach(function (x) { x.classList.toggle("on", x === t); }); draw(); };
+      });
+      draw();
+    });
   }
   /* 계산기·만들 기능: 아직 만들지 않은 기능을 사용자가 볼 수 있게 모아 둔 목록. 만들면 이 자리에 붙여요. */
   var PLANNED = [

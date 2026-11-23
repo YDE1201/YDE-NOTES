@@ -237,3 +237,13 @@ button.result { display: block; width: 100%; text-align: left; font: inherit; co
 .ask-item{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:8px}
 .ask-item p{margin:0}
 .ask-q{white-space:pre-wrap;font-weight:600;margin-bottom:4px!important}
+
+/* 거래처 현황 */
+details.client{margin-bottom:8px}
+details.client summary{cursor:pointer;list-style:none}
+details.client summary::-webkit-details-marker{display:none}
+details.client .cl-top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+details.client p{margin:4px 0 0}
+.cl-dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:12px 0 0}
+.cl-dl dt{color:var(--text-2);font-size:14px}
+.cl-dl dd{margin:0;min-width:0;overflow-wrap:anywhere}
