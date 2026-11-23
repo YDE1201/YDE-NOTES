@@ -435,6 +435,7 @@ function main() {
   }
 
   function viewHome() {
+    var oldQ = askLoad().length;
     var progress = courses().map(function (c) {
       var done = c.items.filter(function (l) { return !l.stub; }).length, total = c.total || done || 1, pct = Math.min(100, Math.round(done / total * 100));
       return '<div class="course-prog"><b>' + esc(c.category) + ' › ' + esc(c.site) + '</b>' +
@@ -442,7 +443,7 @@ function main() {
         '<span class="muted">' + (c.total ? c.total + '개 중 ' + done + '개 완료 (' + pct + '%)' : done + '개 정리됨') + '</span></div>';
     }).join("");
     var recent = LECTURES.filter(function (l) { return !l.stub; }).sort(function (a, b) { return String(b.date || "").localeCompare(String(a.date || "")) || b.no - a.no; }).slice(0, 3);
-    app.innerHTML = sampleNotice() +
+    app.innerHTML = sampleNotice() + (oldQ ? '<a class="card ask-form" href="#/ask" style="text-decoration:none;color:inherit"><b>이 기기에 예전 질문 ' + oldQ + '개가 남아 있어요</b><span class="muted">질문은 이제 질문함 한 곳에만 모여요. 눌러서 정리해 주세요.</span></a>' : "") +
       '<h1 class="page-title">오늘도 한 걸음씩</h1>' +
       '<p class="page-sub">강의 요약과 실무 도구를 한곳에 모았어요.</p>' +
       '<div class="card course-progs">' + progress + '</div>' +
@@ -966,35 +967,31 @@ function main() {
     return "곳간 질문함에서 보낸 질문이에요. axtax(현행 조문·국세청 해석)로 답을 찾아 강의는 '내 질문' 탭(.my.md), 사전은 해당 항목에 넣어 주세요.\n\n" +
       list.map(function (q, i) { return (i + 1) + ". [" + (q.label || "일반") + "] " + q.text; }).join("\n");
   }
+  /* 예전 방식(이 브라우저에만 저장)으로 남은 질문 정리 화면. 새 질문은 모두 공용 질문함(ASK_URL)으로. */
   function viewAsk() {
     var list = askLoad();
-    var open = list.filter(function (q) { return !askAnswered(q); }), done = list.filter(function (q) { return askAnswered(q); });
-    function row(q) {
-      var h = askHref(q), ans = askAnswered(q);
-      return '<div class="card ask-item"><div><p class="ask-q">' + esc(q.text) + '</p><p class="muted">' +
-        (h ? '<a href="' + h + '">' + esc(q.label) + '</a>' : esc(q.label || "일반 질문")) + " · " + esc(q.at || "") +
-        (ans ? ' · <a class="pill mine" href="' + ans.href + '">답변 보기</a>' : "") + '</p></div>' +
-        '<button class="btn ghost" type="button" data-del="' + esc(q.id) + '" aria-label="질문 지우기">지우기</button></div>';
-    }
-    app.innerHTML = '<h1 class="page-title">내 질문함</h1>' +
-      '<div class="card ask-form"><b>질문은 Claude의 \'숫자곳간 바로가기\' 질문함에 적어요</b><p class="muted" style="margin:0">노트북·PC·휴대폰 어디서 적어도 한 곳에 모이고, 클로드가 바로 읽어요. 다 적은 뒤 클로드에게 "질문함 답해 줘"라고만 하면 돼요.</p>' +
+    app.innerHTML = '<h1 class="page-title">예전 질문 정리</h1>' +
+      '<div class="card ask-form"><b>질문은 이제 한 곳, 질문함에만 모여요</b><p class="muted" style="margin:0">노트북·PC·휴대폰 어디서 적어도 같은 목록이 보이고, 답이 달리면 \'답변 완료\'로 바뀌어요.</p>' +
       '<p style="margin:0"><a class="btn" href="' + ASK_URL + '" target="_blank" rel="noopener">질문함 열기 ↗</a></p></div>' +
-      (list.length ? '<h2 class="section-h">이 기기에 남아 있는 예전 질문</h2><p class="muted">예전 방식으로 이 브라우저에만 저장된 질문이에요. 복사해서 클로드에게 보내거나 지워 주세요.</p><div id="askFree" hidden>' + askForm("free", "", "일반 질문") + '</div>' : '<div id="askFree" hidden>' + askForm("free", "", "일반 질문") + '</div>') +
-      '<h2 class="section-h">답을 기다리는 질문 <span class="muted">' + open.length + '</span></h2>' +
-      (open.length ? '<p><button class="btn" type="button" id="askCopy">클로드에게 보낼 질문 복사</button> <span class="muted" id="askCopyMsg" role="status"></span></p>' +
-        '<textarea id="askCopyBox" class="ask-copybox" readonly hidden></textarea>' + open.map(row).join("") : '<p class="muted">남은 질문이 없어요.</p>') +
-      (done.length ? '<h2 class="section-h">답이 달린 질문 <span class="muted">' + done.length + '</span></h2>' + done.map(row).join("") : "");
-    bindAskForm(document.getElementById("askFree"), "free", "", "일반 질문");
+      (list.length ?
+        '<h2 class="section-h">이 기기에만 남은 예전 질문 <span class="muted">' + list.length + '</span></h2>' +
+        '<p class="muted">예전 방식으로 이 브라우저에만 저장된 질문이에요. 클로드에게 이미 보냈다면 비워 주세요. 아직 안 보냈다면 복사해서 보내거나 질문함에 다시 적어 주세요.</p>' +
+        '<div class="ask-row" style="margin-bottom:12px"><button class="btn ghost" type="button" id="askCopy">복사</button><button class="btn ghost" type="button" id="askClear">모두 비우기</button><span class="muted" id="askCopyMsg" role="status"></span></div>' +
+        '<textarea id="askCopyBox" class="ask-copybox" readonly hidden></textarea>' +
+        list.map(function (q) { return '<div class="card ask-item"><div><p class="ask-q">' + esc(q.text) + '</p><p class="muted">' + esc(q.label || "일반 질문") + " · " + esc(q.at || "") + "</p></div></div>"; }).join("")
+        : '<p class="muted">이 기기에 남은 예전 질문은 없어요.</p>');
     var cp = document.getElementById("askCopy");
     if (cp) cp.onclick = function () {
-      var text = askCopyText(open), msg = document.getElementById("askCopyMsg"), box = document.getElementById("askCopyBox");
+      var text = askCopyText(list), msg = document.getElementById("askCopyMsg"), box = document.getElementById("askCopyBox");
       function fallback() { box.hidden = false; box.value = text; box.focus(); box.select(); msg.textContent = "아래 글을 길게 눌러 복사해 주세요."; }
-      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { msg.textContent = "복사했어요. 클로드 대화창에 붙여 넣으세요."; }, fallback);
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { msg.textContent = "복사했어요."; }, fallback);
       else fallback();
     };
-    app.querySelectorAll("[data-del]").forEach(function (b) {
-      b.onclick = function () { askSave(askLoad().filter(function (q) { return q.id !== b.dataset.del; })); viewAsk(); };
-    });
+    var cl = document.getElementById("askClear");
+    if (cl) cl.onclick = function () {
+      if (cl.dataset.step !== "1") { cl.dataset.step = "1"; cl.textContent = "정말 비울까요?"; return; }
+      askSave([]); viewAsk();
+    };
   }
 
   /* ---------- 길 찾기(라우터) ---------- */
