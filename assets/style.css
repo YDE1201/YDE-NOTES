@@ -247,3 +247,58 @@ details.client p{margin:4px 0 0}
 .cl-dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:12px 0 0}
 .cl-dl dt{color:var(--text-2);font-size:14px}
 .cl-dl dd{margin:0;min-width:0;overflow-wrap:anywhere}
+
+.cl-admin summary{cursor:pointer}
+.cl-add{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.cl-add input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);font:inherit}
+.cl-add select{padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);font:inherit}
+.cl-fields{list-style:none;padding:0;margin:10px 0;display:flex;flex-direction:column;gap:6px}
+.cl-fields input,.cl-in{padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--text);font:inherit;min-width:0;width:100%;box-sizing:border-box}
+.cl-fields li{display:flex;gap:8px;align-items:center}
+.cl-fields li input{flex:1}
+.cl-sum{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+.cl-dl dd input[type=checkbox]{width:20px;height:20px}
+
+/* 거래처 현황 대시보드·표·상세 */
+.crumbs { font-size: 14px; color: var(--text-2); margin-bottom: 8px; }
+.dl-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 16px; }
+.dl-chip { padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 14px; }
+.dl-chip.hot { border-color: #c9573f; color: #c9573f; font-weight: 700; }
+.dl-chip.ok { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.tk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.tk { padding: 16px; }
+.tk-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 14px; }
+.tk-name { flex: 0 0 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-bar { flex: 1; height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.tk-bar i { display: block; height: 100%; background: var(--accent); }
+.tk-num { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.tk-left { color: #c9573f; font-weight: 700; }
+.tk-list { margin-top: 8px; font-size: 14px; }
+.tk-list label { display: block; padding: 2px 0; }
+.cl-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 12px; }
+.cl-tools input[type=search] { flex: 1 1 200px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); }
+.cl-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.cl-table { border-collapse: collapse; width: 100%; font-size: 14px; white-space: nowrap; }
+.cl-table th, .cl-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.cl-table th { background: var(--surface-2); font-weight: 700; }
+.cl-table td.nm a { font-weight: 700; }
+.cl-table tr.gone td { color: var(--text-2); text-decoration: line-through; }
+.ce h3 { margin: 16px 0 8px; font-size: 16px; }
+.ce-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 14px; }
+.ce-grid.two { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.ce-f { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.ce-f input, .ce-f select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+.ins { display: flex; flex-direction: column; gap: 6px; }
+.btn.sm { padding: 6px 10px; font-size: 13px; }
+.btn.danger { color: #c9573f; border-color: #c9573f; }
+.ce-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+@media (max-width: 640px) { .ce-grid.two { grid-template-columns: 1fr; } }
+/* 거래처 보안 정보(금고) */
+.vault-lock, .vault-open { padding: 12px; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface-2); }
+.vault-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.vault-row input, .vault-site input, #v_memo { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; min-width: 0; }
+.vault-in { display: flex; gap: 4px; align-items: center; }
+.vault-in input { flex: 1; min-width: 0; }
+.vault-site { display: grid; grid-template-columns: 1fr 1fr 1.6fr; gap: 6px; margin-bottom: 6px; }
+@media (max-width: 640px) { .vault-site { grid-template-columns: 1fr; } }
+.vault-note { margin: 10px 0 0; font-size: 13px; }

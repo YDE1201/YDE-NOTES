@@ -893,9 +893,96 @@ function main() {
     if (t) { t.scrollIntoView(); t.classList.add("flash"); } else window.scrollTo(0, 0);
   }
 
-  /* ---------- 거래처 현황 ----------
-     data/clients.js(window.CLIENTS)는 PC에만 있어요. 인터넷용 곳간에는 복사하지 않아요(build_site.py 가 빼요).
-     주민등록번호·자택 주소는 처음부터 넣지 않아요. 비밀번호도 넣지 않아요. */
+  /* ---------- 거래처 현황 (PC 전용) ----------
+     원본: data/clients.js (위하고 수임처에서 뽑은 기본 정보, PC에만 있음)
+     내가 고친 값·새 거래처·수임해지·신고 완료 체크·내 항목은 이 PC 브라우저(localStorage "clients-extra")에만 저장.
+     백업 .json 으로 내려받고 불러올 수 있어요. 주민등록번호·비밀번호 칸은 만들지 않아요. */
+  var CX_KEY = "clients-extra";
+  var SECRET_RE = /주민|비밀\s*번호|비번|암호|password|passwd|\bpw\b|패스워드|PIN|핀번호|보안카드|OTP/i;
+  var MGR_FIELDS = [["main", "주담당"], ["wht", "원천세"], ["yearend", "연말정산"], ["book", "기장"], ["vat", "부가세"], ["corp", "법인세"], ["inc", "소득세"], ["site", "사업장현황신고"]];
+  var INS_FIELDS = [["health", "건강보험"], ["pension", "국민연금"], ["employ", "고용보험"], ["accident", "산재보험"]];
+  function cxLoad() { var x; try { x = JSON.parse(store(CX_KEY) || "null"); } catch (e) {} x = x || {}; x.fields = x.fields || []; x.values = x.values || {}; x.added = x.added || []; x.done = x.done || {}; return x; }
+  function cxSave(x) { store(CX_KEY, JSON.stringify(x)); }
+  function baseId(c) { return "c" + String(c.code || c.name).replace(/[^0-9A-Za-z가-힣]/g, ""); }
+  function migrateKeys(x) { /* 예전 저장 키("코드|상호")를 새 id 로 옮겨요 */
+    Object.keys(x.values).forEach(function (k) {
+      if (k.indexOf("|") === -1) return;
+      var code = k.split("|")[0], id = "c" + code.replace(/[^0-9A-Za-z가-힣]/g, "");
+      x.values[id] = Object.assign({}, x.values[k], x.values[id] || {}); delete x.values[k];
+    });
+  }
+  function allClients() {
+    var x = cxLoad(); migrateKeys(x);
+    var base = ((window.CLIENTS || {}).clients || []).map(function (c) {
+      var d = { id: baseId(c), name: c.name, type: c.type, bizno: c.bizno, ceo: c.ceo, biz: c.biz, item: c.item, office: c.office, tel: c.tel, addr: c.addr, code: c.code,
+        status: "수임중", kind: "기장", vat: "", wht: "", payday: "", fy: "12", pay: "", email: "", ins: {}, mgr: {}, custom: {} };
+      return { d: d, base: true };
+    });
+    var added = x.added.map(function (d) { return { d: d, base: false }; });
+    return base.concat(added).map(function (o) {
+      var v = x.values[o.d.id] || {}, c = Object.assign({}, o.d, v);
+      c.ins = Object.assign({}, o.d.ins, v.ins || {}); c.mgr = Object.assign({}, o.d.mgr, v.mgr || {}); c.custom = Object.assign({}, v.custom || {});
+      x.fields.forEach(function (f) { if (v[f.id] !== undefined && c.custom[f.id] === undefined) c.custom[f.id] = v[f.id]; });
+      c._base = o.base; c._orig = o.d; return c;
+    }).sort(function (a, b) { return String(a.code || "~").localeCompare(String(b.code || "~")) || a.name.localeCompare(b.name, "ko"); });
+  }
+  function mgrOf(c, k) { return (c.mgr && (c.mgr[k] || c.mgr.main)) || "미정"; }
+
+  /* 신고 일정: 오늘 기준으로 가까운 기한을 만들어요 (일반적인 법정 기한, 휴일 순연은 반영하지 않아요) */
+  function ymd(d) { return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); }
+  function endOf(y, m) { return new Date(y, m + 1, 0); }  /* m: 0-11 */
+  function dday(d, today) { return Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - today) / 86400000); }
+  function buildTasks(list, today) {
+    var T = [], y = today.getFullYear(), m = today.getMonth(), act = list.filter(function (c) { return c.status !== "수임해지"; });
+    function add(t) { if (t.targets.length) T.push(t); }
+    [1, 0].forEach(function (back) {  /* 지난달·이번 달 지급분 */
+      var pm = new Date(y, m - back, 1), py = pm.getFullYear(), pmo = pm.getMonth();
+      add({ id: "wht-" + ymd(pm).slice(0, 7), group: "원천세", label: (pmo + 1) + "월 지급분", deadline: new Date(py, pmo + 1, 10), mgr: "wht",
+        targets: act.filter(function (c) { return c.wht === "월"; }) });
+      add({ id: "simple-" + ymd(pm).slice(0, 7), group: "간이지급명세서", label: (pmo + 1) + "월 지급분", deadline: endOf(py, pmo + 1), mgr: "wht",
+        targets: act.filter(function (c) { return c.pay === "예"; }) });
+      add({ id: "payroll-" + ymd(pm).slice(0, 7), group: "급여 작업", label: (pmo + 1) + "월 귀속", deadline: endOf(py, pmo), mgr: "wht",
+        targets: act.filter(function (c) { return c.pay === "예"; }) });
+    });
+    /* 반기 원천세: 1~6월분 7/10, 7~12월분 1/10 */
+    var half = m < 6 ? { label: (y - 1) + "년 7~12월분", d: new Date(y, 0, 10), id: (y - 1) + "H2" } : { label: y + "년 1~6월분", d: new Date(y, 6, 10), id: y + "H1" };
+    if (m >= 6) half = { label: y + "년 1~6월분", d: new Date(y, 6, 10), id: y + "H1" };
+    if (m >= 7) half = { label: y + "년 7~12월분", d: new Date(y + 1, 0, 10), id: y + "H2" };
+    add({ id: "whth-" + half.id, group: "원천세(반기)", label: half.label, deadline: half.d, mgr: "wht", targets: act.filter(function (c) { return c.wht === "반기"; }) });
+    /* 부가세: 다음 기한 하나 */
+    var vatDues = [[0, 25, "2기 확정", -1], [3, 25, "1기 예정", 0], [6, 25, "1기 확정", 0], [9, 25, "2기 예정", 0], [12, 25, "2기 확정", 0]];
+    var nv = vatDues.map(function (v) { return { d: new Date(y, v[0], v[1]), label: (y + (v[3] || 0) + (v[0] === 12 ? 0 : 0)) + "년 " + v[2], raw: v }; })
+      .filter(function (v) { return dday(v.d, today) >= -5; })[0];
+    if (nv) {
+      var vy = nv.raw[0] === 0 ? y - 1 : y;
+      nv.label = vy + "년 " + nv.raw[2];
+      var isFinal2 = nv.raw[2] === "2기 확정";
+      add({ id: "vat-" + vy + nv.raw[2], group: "부가가치세", label: nv.label, deadline: nv.d, mgr: "vat",
+        targets: act.filter(function (c) { return c.vat === "과세" || (isFinal2 && c.vat === "간이"); }) });
+    }
+    /* 사업장현황신고: 면세 개인, 2/10 */
+    var sd = new Date(m >= 2 ? y + 1 : y, 1, 10);
+    add({ id: "site-" + (sd.getFullYear() - 1), group: "사업장현황신고", label: (sd.getFullYear() - 1) + "년 귀속", deadline: sd, mgr: "site",
+      targets: act.filter(function (c) { return c.type === "개인" && c.vat === "면세"; }) });
+    /* 법인세 신고(결산월+3개월 말일)·중간예납(결산월+8개월 말일), 결산월별로 묶어요 */
+    var fys = {};
+    act.filter(function (c) { return c.type === "법인"; }).forEach(function (c) { var f = parseInt(c.fy, 10) || 12; (fys[f] = fys[f] || []).push(c); });
+    Object.keys(fys).forEach(function (f) {
+      f = +f;
+      [["법인세 신고", 3], ["법인세 중간예납", 8]].forEach(function (k) {
+        var best = null;
+        [-1, 0, 1].forEach(function (dy) { var d = endOf(y + dy, f - 1 + k[1]); if (dday(d, today) >= -30 && (!best || d < best)) best = d; });
+        if (!best) return;
+        var fyY = new Date(best.getFullYear(), best.getMonth() - k[1], 1);
+        add({ id: (k[1] === 3 ? "corp-" : "corpmid-") + ymd(fyY).slice(0, 7), group: k[0], label: f + "월 결산 " + (k[1] === 3 ? fyY.getFullYear() + "사업연도" : (fyY.getFullYear() + 1) + "사업연도"), deadline: best, mgr: "corp", targets: fys[f] });
+      });
+    });
+    /* 종합소득세: 개인 5/31 (성실신고 6/30은 메모로) */
+    var inc = new Date(m >= 6 ? y + 1 : y, 4, 31);
+    add({ id: "inc-" + (inc.getFullYear() - 1), group: "종합소득세", label: (inc.getFullYear() - 1) + "년 귀속", deadline: inc, mgr: "inc", targets: act.filter(function (c) { return c.type === "개인"; }) });
+    return T.sort(function (a, b) { return a.deadline - b.deadline; });
+  }
+
   function loadClients(cb) {
     if (window.CLIENTS) { cb(true); return; }
     if (loadClients.failed) { cb(false); return; }
@@ -905,7 +992,7 @@ function main() {
     sc.onerror = function () { loadClients.failed = true; cb(false); };
     document.head.appendChild(sc);
   }
-  function viewClients() {
+  function viewClients(id) {
     app.innerHTML = '<h1 class="page-title">거래처 현황</h1><p class="page-sub">불러오는 중이에요…</p>';
     loadClients(function (ok) {
       if (!ok) {
@@ -913,38 +1000,293 @@ function main() {
           '<div class="card placeholder"><b>이 화면은 내 PC의 곳간에서만 열려요.</b><p class="muted" style="margin:6px 0 0">거래처 자료는 인터넷(휴대폰용 곳간)에 올리지 않아요. PC에서 사이트_열기로 열어 주세요.</p></div>';
         return;
       }
-      var C = window.CLIENTS, list = (C.clients || []).slice().sort(function (a, b) { return a.name.localeCompare(b.name, "ko"); });
-      var nCorp = list.filter(function (c) { return c.type === "법인"; }).length;
-      app.innerHTML = '<h1 class="page-title">거래처 현황</h1>' +
-        '<p class="page-sub">기장 중인 거래처 ' + list.length + '곳 (법인 ' + nCorp + ' · 개인 ' + (list.length - nCorp) + '). ' +
-        esc(C.source || "") + (C.built ? " · " + esc(C.built) + " 기준" : "") + '. 이 PC에서만 보여요.</p>' +
-        '<div class="searchbox"><input id="clFilter" placeholder="상호, 업종, 대표자, 사업자번호로 찾기" aria-label="거래처 찾기"></div>' +
-        '<div class="tabs" role="group" aria-label="구분" id="clType"><a class="tab on" data-t="">전체</a><a class="tab" data-t="법인">법인</a><a class="tab" data-t="개인">개인</a></div>' +
-        '<div id="clList" class="lec-list"></div>';
-      var type = "";
-      function draw() {
-        var f = String(document.getElementById("clFilter").value || "").toLowerCase().replace(/-/g, "");
-        var rows = list.filter(function (c) {
-          if (type && c.type !== type) return false;
-          if (!f) return true;
-          return [c.name, c.biz, c.item, c.ceo, c.bizno, c.office].join(" ").toLowerCase().replace(/-/g, "").indexOf(f) !== -1;
-        });
-        document.getElementById("clList").innerHTML = rows.length ? rows.map(function (c) {
-          return '<details class="card client"><summary><div class="cl-top"><b>' + esc(c.name) + '</b> <span class="pill">' + esc(c.type) + '</span></div>' +
-            '<p class="muted">' + esc([c.biz, c.item].filter(Boolean).join(" · ")) + '</p></summary>' +
-            '<dl class="cl-dl">' +
-            [["대표자", c.ceo], ["사업자번호", c.bizno], ["관할서", c.office], ["전화", c.tel], ["사업장", c.addr], ["수임처 담당", c.manager], ["세무대리 담당", c.agent], ["회사 코드", c.code]]
-              .filter(function (x) { return x[1]; }).map(function (x) { return "<dt>" + x[0] + "</dt><dd>" + esc(x[1]) + "</dd>"; }).join("") +
-            '</dl><p style="margin:10px 0 0"><a class="btn ghost" href="https://hometax.go.kr" target="_blank" rel="noopener">홈택스 열기 ↗</a></p></details>';
-        }).join("") : '<p class="muted">맞는 거래처가 없어요.</p>';
-      }
-      document.getElementById("clFilter").oninput = draw;
-      document.querySelectorAll("#clType .tab").forEach(function (t) {
-        t.onclick = function () { type = t.dataset.t; document.querySelectorAll("#clType .tab").forEach(function (x) { x.classList.toggle("on", x === t); }); draw(); };
-      });
-      draw();
+      if (id) clientEdit(id); else clientMain();
     });
   }
+
+  function clientMain() {
+    var list = allClients(), today = new Date(); today = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    var x = cxLoad(), tasks = buildTasks(list, today), showGone = clientMain.showGone || false;
+    function doneOf(t) { return x.done[t.id] || {}; }
+    var up = tasks.filter(function (t) { var dd = dday(t.deadline, today); return dd >= -3 && dd <= 30; });
+    var chips = up.map(function (t) {
+      var dd = dday(t.deadline, today), dn = t.targets.filter(function (c) { return doneOf(t)[c.id]; }).length, all = dn === t.targets.length;
+      return '<a class="dl-chip' + (all ? " ok" : dd <= 5 ? " hot" : "") + '" href="#task-' + esc(t.id) + '"><b>' + (dd === 0 ? "D-day" : dd > 0 ? "D-" + dd : "D+" + (-dd)) + "</b> " + esc(t.group) +
+        ' <span class="muted">' + (t.deadline.getMonth() + 1) + "/" + t.deadline.getDate() + " · " + dn + "/" + t.targets.length + (all ? " 완료 ✓" : "") + "</span></a>";
+    }).join("");
+    var cards = tasks.filter(function (t) { return dday(t.deadline, today) >= -45 && dday(t.deadline, today) <= 90; }).map(function (t) {
+      var dn = doneOf(t), byM = {};
+      t.targets.forEach(function (c) { var mg = mgrOf(c, t.mgr); (byM[mg] = byM[mg] || { n: 0, d: 0 }).n++; if (dn[c.id]) byM[mg].d++; });
+      var tot = t.targets.length, td = t.targets.filter(function (c) { return dn[c.id]; }).length;
+      function bar(lbl, d, n, strong) {
+        var pct = n ? Math.round(d / n * 100) : 0;
+        return '<div class="tk-row"><span class="tk-name">' + (strong ? "<b>" + esc(lbl) + "</b>" : esc(lbl)) + '</span><span class="tk-num"><b>' + d + "</b>/" + n + " (" + pct + "%)" + (n - d ? ' <span class="tk-left">·' + (n - d) + "</span>" : "") + '</span><span class="tk-bar"><i style="width:' + pct + '%"></i></span></div>';
+      }
+      var dd = dday(t.deadline, today);
+      return '<section class="card tk" id="task-' + esc(t.id) + '"><h3>' + esc(t.group) + ' <span class="muted">' + esc(t.label) + "</span></h3>" +
+        '<p class="muted tk-due">기한 ' + ymd(t.deadline) + " · " + (dd >= 0 ? "D-" + dd : (td < tot ? "기한 " + (-dd) + "일 지남" : "끝남")) + "</p>" +
+        bar("전체", td, tot, true) + Object.keys(byM).sort().map(function (k) { return bar(k, byM[k].d, byM[k].n); }).join("") +
+        '<details class="tk-list"><summary>거래처별 체크</summary><ul>' + t.targets.map(function (c) {
+          return '<li><label><input type="checkbox" data-task="' + esc(t.id) + '" data-cid="' + esc(c.id) + '"' + (dn[c.id] ? " checked" : "") + "> " + esc(c.name) + ' <span class="muted">' + esc(mgrOf(c, t.mgr)) + "</span></label></li>";
+        }).join("") + "</ul></details></section>";
+    }).join("");
+    var shown = list.filter(function (c) { return showGone || c.status !== "수임해지"; });
+    var gone = list.filter(function (c) { return c.status === "수임해지"; }).length;
+    var cols = [["code", "코드"], ["name", "상호"], ["status", "수임상태"], ["kind", "수임구분"], ["bizno", "사업자번호"], ["type", "법인·개인"], ["vat", "과세유형"], ["fy", "결산월"], ["wht", "원천세"]]
+      .concat(MGR_FIELDS.map(function (f) { return ["mgr." + f[0], f[1] === "주담당" ? "주담당" : f[1] + "담당"]; }));
+    function cell(c, k) { return k.indexOf("mgr.") === 0 ? (c.mgr[k.slice(4)] || "") : (k === "fy" && c[k] ? c[k] + "월" : (c[k] || "")); }
+    var needSetup = list.filter(function (c) { return !c.vat || !c.wht; }).length;
+    app.innerHTML = '<h1 class="page-title">거래처 현황 <span class="muted" style="font-size:15px;font-weight:500">총 ' + (list.length - gone) + "곳" + (gone ? " (수임해지 " + gone + "곳 제외)" : "") + "</span></h1>" +
+      (needSetup ? '<div class="card ask-form"><b>' + needSetup + '곳은 과세유형·원천세 유형이 비어 있어요.</b><span class="muted">상호를 눌러 채우면 아래 신고 현황에 대상으로 잡혀요.</span></div>' : "") +
+      '<section class="card"><h2 class="section-h" style="margin-top:0">📅 다가오는 신고기한 <span class="muted">30일 이내</span></h2><div class="dl-chips">' + (chips || '<span class="muted">30일 안에 기한이 없어요.</span>') + "</div></section>" +
+      '<h2 class="section-h">신고 업무 현황</h2><div class="tk-grid">' + (cards || '<p class="muted">대상 거래처가 있는 신고가 없어요. 거래처 정보를 채워 주세요.</p>') + "</div>" +
+      '<h2 class="section-h">거래처 목록</h2>' +
+      '<div class="cl-tools"><input id="clFilter" placeholder="상호 · 사업자번호 · 코드 검색" aria-label="거래처 찾기" value="' + esc(clientMain.q || "") + '">' +
+      '<label class="muted"><input type="checkbox" id="clGone"' + (showGone ? " checked" : "") + "> 수임해지 포함</label>" +
+      '<a class="btn" href="#/clients/new">+ 새 거래처</a></div>' +
+      '<div class="cl-table-wrap"><table class="cl-table"><thead><tr>' + cols.map(function (c) { return "<th>" + c[1] + "</th>"; }).join("") + '</tr></thead><tbody id="clBody"></tbody></table></div>' +
+      '<details class="card cl-admin"><summary><b>백업 · 내 항목</b> <span class="muted">고친 내용은 이 PC 브라우저에만 저장돼요</span></summary>' +
+      '<div class="ask-row" style="margin-top:12px"><button class="btn ghost" type="button" id="cxExport">백업 파일 내려받기</button><label class="btn ghost" for="cxImport">백업 파일 불러오기</label><input type="file" id="cxImport" accept=".json" hidden><span class="muted" id="cfMsg" role="status"></span></div>' +
+      '<div class="cl-add"><input id="cfName" placeholder="거래처마다 둘 내 항목 (예: 홈택스 아이디 메모)" aria-label="새 항목 이름"><select id="cfType" aria-label="항목 종류"><option value="text">글자</option><option value="check">체크</option></select><button class="btn ghost" type="button" id="cfAdd">항목 추가</button></div>' +
+      (x.fields.length ? '<ul class="cl-fields">' + x.fields.map(function (f) { return '<li><input value="' + esc(f.name) + '" data-ren="' + esc(f.id) + '" aria-label="항목 이름"> <span class="muted">' + (f.type === "check" ? "체크" : "글자") + '</span> <button class="btn ghost" type="button" data-delf="' + esc(f.id) + '">지우기</button></li>'; }).join("") + "</ul>" : "") +
+      '<p class="muted">주민등록번호·비밀번호 같은 항목은 만들 수 없어요. 브라우저 기록을 지우면 사라질 수 있으니 가끔 백업 파일을 내려받아 두세요.</p></details>';
+    function drawTable() {
+      var q = String(document.getElementById("clFilter").value || "").toLowerCase().replace(/-/g, "");
+      clientMain.q = document.getElementById("clFilter").value;
+      var rows = shown.filter(function (c) { return !q || [c.name, c.bizno, c.code, c.ceo].join(" ").toLowerCase().replace(/-/g, "").indexOf(q) !== -1; });
+      document.getElementById("clBody").innerHTML = rows.map(function (c) {
+        return "<tr" + (c.status === "수임해지" ? ' class="gone"' : "") + ">" + cols.map(function (k) {
+          var v = cell(c, k[0]);
+          if (k[0] === "name") return '<td class="nm"><a href="#/clients/' + encodeURIComponent(c.id) + '">' + esc(v) + "</a></td>";
+          return "<td>" + esc(v) + "</td>";
+        }).join("") + "</tr>";
+      }).join("") || '<tr><td colspan="' + cols.length + '" class="muted">맞는 거래처가 없어요.</td></tr>';
+    }
+    drawTable();
+    document.getElementById("clFilter").oninput = drawTable;
+    document.getElementById("clGone").onchange = function () { clientMain.showGone = this.checked; clientMain(); };
+    app.querySelectorAll("[data-task]").forEach(function (cb) {
+      cb.onchange = function () {
+        var y = cxLoad(), d = y.done[cb.dataset.task] = y.done[cb.dataset.task] || {};
+        if (cb.checked) d[cb.dataset.cid] = true; else delete d[cb.dataset.cid];
+        cxSave(y); var open = cb.dataset.task; clientMain();
+        var sec = document.getElementById("task-" + open); if (sec) { sec.querySelector("details").open = true; }
+      };
+    });
+    app.querySelectorAll(".dl-chip").forEach(function (a) {
+      a.onclick = function (e) { e.preventDefault(); var s = document.getElementById(a.getAttribute("href").slice(1)); if (s) { s.scrollIntoView({ block: "center" }); s.querySelector("details").open = true; s.classList.add("flash"); } };
+    });
+    var adm = app.querySelector(".cl-admin");
+    adm.addEventListener("click", function (e) {
+      var y = cxLoad(), msg = document.getElementById("cfMsg");
+      if (e.target.id === "cfAdd") {
+        var name = document.getElementById("cfName").value.trim();
+        if (!name) return;
+        if (SECRET_RE.test(name)) { msg.textContent = "주민번호·비밀번호는 거래처 상세 화면의 '🔒 보안 정보'(잠금 칸)에 넣어 주세요."; return; }
+        y.fields.push({ id: "f" + Date.now().toString(36), name: name, type: document.getElementById("cfType").value });
+        cxSave(y); clientMain(); app.querySelector(".cl-admin").open = true;
+      }
+      var del = e.target.closest("[data-delf]");
+      if (del) {
+        if (del.dataset.step !== "1") { del.dataset.step = "1"; del.textContent = "모든 거래처 값도 지워요. 정말?"; return; }
+        y.fields = y.fields.filter(function (f) { return f.id !== del.dataset.delf; });
+        Object.keys(y.values).forEach(function (k) { delete y.values[k][del.dataset.delf]; if (y.values[k].custom) delete y.values[k].custom[del.dataset.delf]; });
+        cxSave(y); clientMain(); app.querySelector(".cl-admin").open = true;
+      }
+      if (e.target.id === "cxExport") {
+        var blob = new Blob([JSON.stringify(y, null, 1)], { type: "application/json" }), a = document.createElement("a");
+        a.href = URL.createObjectURL(blob); a.download = "거래처_추가정보_" + ymd(new Date()) + ".json"; a.click();
+      }
+    });
+    adm.addEventListener("change", function (e) {
+      var y = cxLoad(), msg = document.getElementById("cfMsg");
+      if (e.target.dataset && e.target.dataset.ren) {
+        var nm = e.target.value.trim();
+        if (!nm || SECRET_RE.test(nm)) { msg.textContent = "그 이름으로는 바꿀 수 없어요."; return; }
+        y.fields.forEach(function (f) { if (f.id === e.target.dataset.ren) f.name = nm; });
+        cxSave(y); msg.textContent = "바꿨어요.";
+      }
+      if (e.target.id === "cxImport" && e.target.files[0]) {
+        var rd = new FileReader();
+        rd.onload = function () {
+          try { var z = JSON.parse(rd.result); if (!z || typeof z.values !== "object") throw 0; cxSave(z); clientMain(); }
+          catch (err) { msg.textContent = "백업 파일을 읽지 못했어요. 곳간에서 내려받은 .json 파일인지 확인해 주세요."; }
+        };
+        rd.readAsText(e.target.files[0]);
+      }
+    });
+  }
+
+  /* 🔒 보안 정보(금고): 주민등록번호·홈택스·사이트 계정을 금고 비밀번호로 암호화(AES-GCM, PBKDF2)해서 clients-extra.vault 에 저장.
+     금고 비밀번호는 어디에도 저장하지 않고, 연 동안만 메모리에 열쇠를 두며 10분 동안 안 쓰면 다시 잠가요.
+     비밀번호를 잊으면 아무도 풀 수 없어요(복구 불가). 백업 .json 에도 암호화된 채로 들어가요. */
+  var VKEY = null, vTimer = null, VAULT_IDLE = 10 * 60 * 1000;
+  function vb64e(buf) { var s = "", a = new Uint8Array(buf); for (var i = 0; i < a.length; i++) s += String.fromCharCode(a[i]); return btoa(s); }
+  function vb64d(t) { var s = atob(t), a = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
+  function vDerive(pw, salt, iter) {
+    return crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]).then(function (base) {
+      return crypto.subtle.deriveKey({ name: "PBKDF2", salt: salt, iterations: iter, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+    });
+  }
+  function vEnc(key, obj) {
+    var iv = crypto.getRandomValues(new Uint8Array(12));
+    return crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, key, new TextEncoder().encode(JSON.stringify(obj))).then(function (ct) { return { iv: vb64e(iv), ct: vb64e(ct) }; });
+  }
+  function vDec(key, box) {
+    return crypto.subtle.decrypt({ name: "AES-GCM", iv: vb64d(box.iv) }, key, vb64d(box.ct)).then(function (pt) { return JSON.parse(new TextDecoder().decode(pt)); });
+  }
+  function vTouch() { clearTimeout(vTimer); vTimer = setTimeout(vLock, VAULT_IDLE); }
+  function vLock() { VKEY = null; clearTimeout(vTimer); var b = document.getElementById("vaultBox"); if (b) vaultRender(b.dataset.cid); }
+  window.addEventListener("hashchange", function () { if (VKEY) vTouch(); });
+
+  function vaultRender(cid) {
+    var box = document.getElementById("vaultBox"); if (!box) return;
+    box.dataset.cid = cid;
+    var x = cxLoad(), V = x.vault;
+    if (!(window.crypto && crypto.subtle)) { box.innerHTML = '<p class="muted">이 브라우저에서는 잠금 기능을 쓸 수 없어요. 크롬이나 엣지로 열어 주세요.</p>'; return; }
+    if (!V) {
+      box.innerHTML = '<div class="vault-lock"><p class="muted">처음 한 번 <b>금고 비밀번호</b>를 정해요. 이 비밀번호를 잊으면 보안 정보는 <b>아무도 다시 볼 수 없어요</b>(곳간도 저도 못 풀어요). 홈택스 비밀번호와는 다른 것으로 정해 주세요.</p>' +
+        '<div class="vault-row"><input type="password" id="vNew1" placeholder="금고 비밀번호 (8자 이상)" autocomplete="new-password"><input type="password" id="vNew2" placeholder="한 번 더" autocomplete="new-password">' +
+        '<button class="btn sm" type="button" id="vMake">금고 만들기</button></div><span class="muted" id="vMsg" role="status"></span></div>';
+      document.getElementById("vMake").onclick = function () {
+        var a = document.getElementById("vNew1").value, b = document.getElementById("vNew2").value, m = document.getElementById("vMsg");
+        if (a.length < 8) { m.textContent = "8자 이상으로 정해 주세요."; return; }
+        if (a !== b) { m.textContent = "두 칸이 달라요."; return; }
+        var salt = crypto.getRandomValues(new Uint8Array(16)), iter = 310000;
+        m.textContent = "만드는 중…";
+        vDerive(a, salt, iter).then(function (k) {
+          return vEnc(k, "gotgan-vault-ok").then(function (chk) {
+            var y = cxLoad(); y.vault = { v: 1, salt: vb64e(salt), iter: iter, chk: chk, data: {} }; cxSave(y); VKEY = k; vTouch(); vaultRender(cid);
+          });
+        });
+      };
+      return;
+    }
+    if (!VKEY) {
+      box.innerHTML = '<div class="vault-lock"><div class="vault-row"><input type="password" id="vPw" placeholder="금고 비밀번호" autocomplete="current-password">' +
+        '<button class="btn sm" type="button" id="vOpen">열기</button></div><span class="muted" id="vMsg" role="status">' + (V.data[cid] ? "저장된 보안 정보가 있어요." : "아직 저장된 보안 정보가 없어요.") + "</span></div>";
+      var open = function () {
+        var m = document.getElementById("vMsg"); m.textContent = "여는 중…";
+        vDerive(document.getElementById("vPw").value, vb64d(V.salt), V.iter).then(function (k) {
+          return vDec(k, V.chk).then(function () { VKEY = k; vTouch(); vaultRender(cid); });
+        }).catch(function () { m.textContent = "비밀번호가 맞지 않아요."; });
+      };
+      document.getElementById("vOpen").onclick = open;
+      document.getElementById("vPw").onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); open(); } };
+      return;
+    }
+    vTouch();
+    (V.data[cid] ? vDec(VKEY, V.data[cid]) : Promise.resolve({})).then(function (d) {
+      d = d || {}; var sites = (d.sites || []).concat([{}]);
+      function sec(id, label, v, secret, ph) {
+        return '<label class="ce-f"><span>' + label + '</span><span class="vault-in"><input id="' + id + '" ' + (secret ? 'type="password" ' : "") + 'value="' + esc(v || "") + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : "") + ' autocomplete="off">' +
+          (secret ? '<button class="btn ghost sm" type="button" data-vshow>보기</button>' : "") + '<button class="btn ghost sm" type="button" data-vcopy>복사</button></span></label>';
+      }
+      function siteRow(s) {
+        return '<div class="vault-site"><input data-s="name" value="' + esc(s.name || "") + '" placeholder="사이트 (예: 4대보험 EDI)"><input data-s="id" value="' + esc(s.id || "") + '" placeholder="아이디" autocomplete="off">' +
+          '<span class="vault-in"><input data-s="pw" type="password" value="' + esc(s.pw || "") + '" placeholder="비밀번호" autocomplete="off"><button class="btn ghost sm" type="button" data-vshow>보기</button><button class="btn ghost sm" type="button" data-vcopy>복사</button></span></div>';
+      }
+      box.innerHTML = '<div class="vault-open"><div class="ce-grid">' +
+        sec("v_rrn", "대표자 주민등록번호", d.rrn, true, "000000-0000000") + sec("v_htid", "홈택스 아이디", d.htid) + sec("v_htpw", "홈택스 비밀번호", d.htpw, true) +
+        '</div><div class="ce-f" style="margin-top:10px"><span>그 밖의 사이트 계정</span><div id="vSites">' + sites.map(siteRow).join("") + '</div><button class="btn ghost sm" type="button" id="vAddSite">+ 사이트 추가</button></div>' +
+        '<label class="ce-f" style="margin-top:10px"><span>보안 메모</span><textarea id="v_memo" rows="2">' + esc(d.memo || "") + "</textarea></label>" +
+        '<p class="muted vault-note">열려 있어요. 아래 \'저장\'을 누르면 잠긴 채로 저장돼요. 10분 동안 안 쓰면 저절로 잠겨요. <button class="btn ghost sm" type="button" id="vLockBtn">지금 잠그기</button></p></div>';
+      document.getElementById("vAddSite").onclick = function () { document.getElementById("vSites").insertAdjacentHTML("beforeend", siteRow({})); vTouch(); };
+      document.getElementById("vLockBtn").onclick = vLock;
+      box.onclick = function (e) {
+        var t = e.target; vTouch();
+        if (t.hasAttribute("data-vshow")) { var i = t.parentNode.querySelector("input"); var hid = i.type === "password"; i.type = hid ? "text" : "password"; t.textContent = hid ? "숨기기" : "보기"; }
+        if (t.hasAttribute("data-vcopy")) {
+          var v = t.parentNode.querySelector("input").value; if (!v) return;
+          (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject()).then(function () { t.textContent = "복사됨"; setTimeout(function () { t.textContent = "복사"; }, 1500); }, function () { t.textContent = "복사 안 됨"; });
+        }
+      };
+    }).catch(function () { box.innerHTML = '<p class="muted">보안 정보를 풀지 못했어요. 다른 금고(백업)에서 불러온 것인지 확인해 주세요.</p>'; });
+  }
+  /* 저장할 때: 잠겨 있으면 undefined(그대로 둠), 열려 있고 다 비면 null(지움), 아니면 암호화한 상자 */
+  function vaultCollect(cid) {
+    if (!VKEY || !document.getElementById("v_rrn")) return Promise.resolve(undefined);
+    var g = function (id) { return document.getElementById(id).value.trim(); };
+    var d = { rrn: g("v_rrn"), htid: g("v_htid"), htpw: document.getElementById("v_htpw").value, memo: g("v_memo"), sites: [] };
+    document.querySelectorAll("#vSites .vault-site").forEach(function (r) {
+      var s = {}; r.querySelectorAll("[data-s]").forEach(function (i) { if (i.value.trim()) s[i.dataset.s] = i.dataset.s === "pw" ? i.value : i.value.trim(); });
+      if (s.name || s.id || s.pw) d.sites.push(s);
+    });
+    if (!d.rrn && !d.htid && !d.htpw && !d.memo && !d.sites.length) return Promise.resolve(null);
+    return vEnc(VKEY, d);
+  }
+
+  function clientEdit(id) {
+    var x = cxLoad(), isNew = id === "new";
+    var c = isNew ? { id: "n" + Date.now().toString(36), name: "", type: "법인", status: "수임중", kind: "기장", vat: "과세", wht: "월", fy: "12", pay: "", ins: {}, mgr: {}, custom: {}, _base: false, _orig: {} }
+      : allClients().filter(function (y) { return y.id === id; })[0];
+    if (!c) { app.innerHTML = '<p>거래처를 찾지 못했어요. <a href="#/clients">거래처 현황으로</a></p>'; return; }
+    function sel(name, opts, v) { return '<select id="ce_' + name + '">' + opts.map(function (o) { return "<option" + (String(o) === String(v || "") ? " selected" : "") + ">" + esc(o) + "</option>"; }).join("") + "</select>"; }
+    function inp(name, v, ph) { return '<input id="ce_' + name + '" value="' + esc(v || "") + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : "") + ">"; }
+    function f(label, ctl, hint) { return '<label class="ce-f"><span>' + label + "</span>" + ctl + (hint ? '<small class="muted">' + hint + "</small>" : "") + "</label>"; }
+    var mgrNames = {}; allClients().forEach(function (y) { Object.keys(y.mgr || {}).forEach(function (k) { if (y.mgr[k]) mgrNames[y.mgr[k]] = 1; }); });
+    var months = []; for (var i = 1; i <= 12; i++) months.push(String(i));
+    app.innerHTML = '<div class="crumbs"><a href="#/clients">거래처 현황</a> › ' + (isNew ? "새 거래처" : "거래처 수정") + "</div>" +
+      '<h1 class="page-title">' + (isNew ? "새 거래처" : "거래처 수정 · " + esc(c.name)) + "</h1>" +
+      '<form class="card ce" id="ceForm" autocomplete="off">' +
+      '<h3>기본정보</h3><div class="ce-grid">' +
+      f("회사 코드", inp("code", c.code)) + f("수임상태", sel("status", ["수임중", "수임해지"], c.status)) + f("수임구분", sel("kind", ["기장", "신고대리", "조정"], c.kind)) +
+      f("사업자등록번호", inp("bizno", c.bizno, "000-00-00000")) + f("상호", inp("name", c.name)) +
+      f("법인·개인", sel("type", ["법인", "개인"], c.type)) + f("과세유형", sel("vat", ["", "과세", "간이", "면세"], c.vat), "부가세 신고 대상 판정에 써요") +
+      f("대표자", inp("ceo", c.ceo)) + f("업태", inp("biz", c.biz)) + f("종목", inp("item", c.item)) + f("관할서", inp("office", c.office)) +
+      f("원천세 신고유형", sel("wht", ["", "월", "반기", "해당없음"], c.wht)) + f("급여일", inp("payday", c.payday, "예: 당월 말일")) +
+      f("결산월", sel("fy", months, c.fy || "12"), "법인은 보통 12월") + f("급여 작업 대상", sel("pay", ["", "예", "아니오"], c.pay), "예면 급여 작업·간이지급명세서 대상") +
+      f("전화", inp("tel", c.tel)) + f("전자세금계산서 이메일", inp("email", c.email)) + f("사업장 주소", inp("addr", c.addr)) +
+      "</div><h3>4대보험 관리번호</h3><div class=\"ce-grid two\">" +
+      INS_FIELDS.map(function (k) {
+        var vals = (c.ins[k[0]] || []).concat([""]);
+        return '<div class="ce-f"><span>' + k[1] + ' 관리번호</span><div class="ins" data-ins="' + k[0] + '">' + vals.map(function (v) { return '<input value="' + esc(v) + '" placeholder="사업자번호-0">'; }).join("") +
+          '</div><button class="btn ghost sm" type="button" data-addins="' + k[0] + '">+ 추가</button><small class="muted">지점·공장·건설현장은 번호가 따로 있어요. 빈 줄은 저장하지 않아요.</small></div>';
+      }).join("") +
+      '</div><h3>담당자</h3><datalist id="mgrList">' + Object.keys(mgrNames).map(function (n) { return '<option value="' + esc(n) + '">'; }).join("") + '<option value="해당없음"></datalist><div class="ce-grid">' +
+      MGR_FIELDS.map(function (k) { return f(k[1], '<input id="ce_mgr_' + k[0] + '" list="mgrList" value="' + esc(c.mgr[k[0]] || "") + '">'); }).join("") +
+      "</div>" +
+      (x.fields.length ? "<h3>내 항목</h3><div class=\"ce-grid\">" + x.fields.map(function (fl) {
+        var v = c.custom[fl.id];
+        return fl.type === "check" ? f(esc(fl.name), '<input type="checkbox" id="ce_cf_' + fl.id + '"' + (v === true ? " checked" : "") + ">") : f(esc(fl.name), '<input id="ce_cf_' + fl.id + '" value="' + esc(v || "") + '">');
+      }).join("") + "</div>" : "") +
+      '<h3>🔒 보안 정보 <span class="muted" style="font-size:13px;font-weight:500">금고 비밀번호로 잠가서 저장해요</span></h3><div id="vaultBox"></div>' +
+      '<div class="ce-actions"><a class="btn ghost" href="#/clients">취소</a><button class="btn" type="submit">저장</button>' +
+      (!isNew && !c._base ? '<button class="btn ghost danger" type="button" id="ceDel">이 거래처 지우기</button>' : "") +
+      '<span class="muted" id="ceMsg" role="status"></span></div></form>' +
+      '<p class="muted">수임이 끝난 거래처는 수임상태를 \'수임해지\'로 바꾸면 목록과 신고 현황에서 빠져요(지우지 않아요).</p>';
+    app.querySelectorAll("[data-addins]").forEach(function (b) {
+      b.onclick = function () { var box = app.querySelector('[data-ins="' + b.dataset.addins + '"]'), i2 = document.createElement("input"); i2.placeholder = "사업자번호-0"; box.appendChild(i2); i2.focus(); };
+    });
+    var del = document.getElementById("ceDel");
+    if (del) del.onclick = function () {
+      if (del.dataset.step !== "1") { del.dataset.step = "1"; del.textContent = "정말 지울까요?"; return; }
+      var y = cxLoad(); y.added = y.added.filter(function (a) { return a.id !== c.id; }); delete y.values[c.id]; if (y.vault) delete y.vault.data[c.id]; cxSave(y); location.hash = "#/clients";
+    };
+    document.getElementById("ceForm").onsubmit = function (e) {
+      e.preventDefault();
+      var y = cxLoad(), g = function (n) { var el = document.getElementById("ce_" + n); return el ? el.value.trim() : ""; };
+      var d = { code: g("code"), status: g("status"), kind: g("kind"), bizno: g("bizno"), name: g("name"), type: g("type"), vat: g("vat"), ceo: g("ceo"), biz: g("biz"), item: g("item"),
+        office: g("office"), wht: g("wht"), payday: g("payday"), fy: g("fy"), pay: g("pay"), tel: g("tel"), email: g("email"), addr: g("addr"), ins: {}, mgr: {}, custom: {} };
+      if (!d.name) { document.getElementById("ceMsg").textContent = "상호를 적어 주세요."; return; }
+      INS_FIELDS.forEach(function (k) { d.ins[k[0]] = Array.prototype.map.call(app.querySelectorAll('[data-ins="' + k[0] + '"] input'), function (i3) { return i3.value.trim(); }).filter(Boolean); });
+      MGR_FIELDS.forEach(function (k) { var v = g("mgr_" + k[0]); if (v) d.mgr[k[0]] = v; });
+      y.fields.forEach(function (fl) { var el = document.getElementById("ce_cf_" + fl.id); if (!el) return; if (fl.type === "check") { if (el.checked) d.custom[fl.id] = true; } else if (el.value.trim()) d.custom[fl.id] = el.value.trim(); });
+      if (c._base) {  /* 위하고 원본과 같은 값은 저장하지 않아요 */
+        var o = c._orig, ov = {};
+        Object.keys(d).forEach(function (k) { if (k === "ins" || k === "mgr" || k === "custom") ov[k] = d[k]; else if (String(d[k] || "") !== String(o[k] || "")) ov[k] = d[k]; });
+        y.values[c.id] = ov;
+      } else {
+        d.id = c.id;
+        y.added = y.added.filter(function (a) { return a.id !== c.id; }).concat([d]);
+      }
+      vaultCollect(c.id).then(function (box) { if (box) y.vault.data[c.id] = box; else if (box === null && y.vault) delete y.vault.data[c.id]; cxSave(y); location.hash = "#/clients"; })
+        .catch(function () { document.getElementById("ceMsg").textContent = "보안 정보를 저장하지 못했어요. 다시 눌러 주세요."; });
+    };
+    vaultRender(c.id);
+  }
+
+
   /* 계산기·만들 기능: 아직 만들지 않은 기능을 사용자가 볼 수 있게 모아 둔 목록. 만들면 이 자리에 붙여요. */
   var PLANNED = [
     { t: "통합고용세액공제 계산기", d: "처음 계획",
@@ -1059,7 +1401,7 @@ function main() {
     if (nav === "lectures") viewLectures();
     else if (nav === "lecture") { nav = "lectures"; viewLecture(parts[1], parts[2]); }
     else if (nav === "search") viewSearch((query.match(/(?:^|&)q=([^&]*)/) || [])[1] || "");
-    else if (nav === "clients") viewClients();
+    else if (nav === "clients") viewClients(parts[1]);
     else if (nav === "dict") { if (parts[1]) viewDictEntry(parts[1], parts[2]); else viewDict(); }
     else if (nav === "calculator") viewCalculator();
     else if (nav === "ask") viewAsk();
